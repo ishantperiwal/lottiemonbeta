@@ -1,0 +1,1013 @@
+// --- Global/Accessible Scope Variables ---
+    let originalData = null;
+     let originalFilename = 'animation';
+     let rawOriginalFileName = 'animation';
+    const maxSegments = 10;
+    const segmentColors = [
+      '#87d8c0', // Mint Green
+      '#c5e0a5', // Pastel Olive
+      '#ffb79a', // Soft Peach
+      '#ff938a', // Muted Salmon
+      '#ff707e', // Dusty Rose
+      '#b890d9', // Medium Lavender
+      '#9cdcdc', // Aqua Blue
+      '#e9d8a6', // Sandy Beige
+      '#e8a7b1', // Deeper Rose
+      '#95c5c5'  // Teal Blue
+    ];
+    let animation, totalFrames;
+    const segments = [];
+    let selectedSegmentId = null; // Keep track of the playing segment's ID
+    let mainPlaying = false;
+
+    // Get references to elements once
+    const mainBtn = document.getElementById('mainPlay');
+    const fullSeek = document.getElementById('fullSeek');
+    const tooltip = document.getElementById('seekTooltip');
+    const segmentsContainer = document.getElementById('segmentsContainer');
+    const animationContainer = document.getElementById('animation-container');
+
+
+    const applyAndCloseBtn = document.getElementById('applyAndCloseBtn');
+    applyAndCloseBtn.addEventListener('click', handleApplyAndClose);
+
+    // --- Define Listener Functions ---
+
+    // Listener for manual seeking on the main slider
+    const handleSeekInput = (e) => {
+      if (!animation) return;
+      const f = +e.target.value;
+      animation.resetSegments(true);
+      animation.goToAndStop(f, true);
+      // Optionally update tooltip during manual drag
+       updateTooltip(f);
+       tooltip.style.opacity = '1'; // Keep tooltip visible while dragging
+       tooltip.style.display = 'block';
+    };
+
+     // Listener to hide tooltip after manual seek finishes
+     const handleSeekChange = () => {
+        // Wait a bit, then fade out, then hide
+        setTimeout(() => {
+            tooltip.style.opacity = '0';
+            setTimeout(() => {
+            tooltip.style.display = 'none';
+            }, 300);
+        }, 1500); // Shorter delay after manual change
+     };
+
+    // Listener for updating seekbar during FULL animation playback
+    const updateSeekOnEnterFrame_Full = () => {
+      if (!animation || mainPlaying === false) return; // Only update if main animation is playing
+       const currentFrame = Math.floor(animation.currentFrame);
+       // Only update if the value actually changes, prevents potential jitter
+       if (parseInt(fullSeek.value) !== currentFrame) {
+           fullSeek.value = currentFrame;
+           // Update tooltip only if it's currently hidden (avoids flicker with manual seek)
+           if (tooltip.style.display === 'none') {
+               updateTooltip(currentFrame);
+           }
+       }
+    };
+
+    // Listener for updating seekbar during SEGMENT animation playback
+    const updateSeekOnEnterFrame_Segment = () => {
+      if (!animation || selectedSegmentId === null) return; // Ensure a segment is selected
+      const currentSegment = segments.find(s => s.id === selectedSegmentId);
+      if (!currentSegment) return;
+
+      // Calculate the global frame based on segment progress
+      // Assuming animation.currentFrame is 0-based relative to segment start during playSegments
+      const frameWithinSegment = Math.floor(animation.currentFrame);
+      const calculatedGlobalFrame = currentSegment.start + frameWithinSegment;
+
+      // Clamp the value to be within the total animation range
+      const finalGlobalFrame = Math.min(Math.max(0, calculatedGlobalFrame), totalFrames);
+
+       // Only update if the value actually changes
+       if (parseInt(fullSeek.value) !== finalGlobalFrame) {
+            fullSeek.value = finalGlobalFrame;
+            // Update tooltip only if it's currently hidden
+            if (tooltip.style.display === 'none') {
+                updateTooltip(finalGlobalFrame);
+            }
+       }
+    };
+
+    // Helper to update tooltip position and text
+    function updateTooltip(frame) {
+        tooltip.textContent = frame;
+        const pct = frame / totalFrames;
+        const trackWidth = fullSeek.clientWidth;
+        // Adjust position calculation based on thumb width (20px in CSS) and track padding
+        const thumbWidth = 20;
+        const effectiveTrackWidth = trackWidth - thumbWidth; // Usable track width
+        const x = (thumbWidth / 2) + (pct * effectiveTrackWidth); // Center tooltip over thumb center
+        tooltip.style.left = `${x}px`;
+        // console.log(`Frame: ${frame}, Pct: ${pct}, TrackWidth: ${trackWidth}, X: ${x}`);
+    }
+
+
+    // --- Initialization and Main Logic ---
+
+    window.addEventListener('message', (e) => {
+      if (e.data.type === 'lottieData') {
+        originalData = e.data.data;
+        originalFilename = e.data.filename || 'animation';
+        rawOriginalFileName = e.data.filename || 'animation';
+        console.log('loaded');
+        try {
+          if (!originalData || !originalData.v || !originalData.op || !originalData.fr) throw 'Invalid Lottie JSON';
+          initAnim(originalData);
+          console.log('initiated');
+        } catch (err) {
+          console.error("Error initializing animation:", err);
+          // Handle error display if needed
+        }
+      }
+
+
+    });
+
+    function sanitizeName(name) {
+        if (!name) return 'segment'; // Handle empty names
+        // Replace spaces and common problematic characters with underscores
+        // Allow letters, numbers, underscore, hyphen
+        return name.trim().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/gi, '');
+    }
+
+    mainBtn.onclick = () => {
+    if (!animation) return;
+
+    // 1. If a segment was playing/selected, stop and deselect it
+    if (selectedSegmentId !== null) {
+        const previousButton = document.querySelector(`.play-btn.paused[data-id='${selectedSegmentId}']`);
+        if (previousButton) {
+            previousButton.classList.remove('paused'); // Deactivate segment button
+        }
+        animation.pause(); // Pause whatever was playing
+        animation.resetSegments(true); // IMPORTANT: Reset segment state
+        selectedSegmentId = null; // Deselect the segment
+    }
+
+    // 2. Toggle main playback state
+    if (mainPlaying) { // If currently playing full animation -> pause it
+        animation.pause();
+        mainPlaying = false;
+    } else { // If currently paused/stopped -> play full animation
+        // 3. Ensure correct listeners are active for main playback
+        animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Segment);
+        animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Full); // Remove first to prevent duplicates
+        animation.addEventListener('enterFrame', updateSeekOnEnterFrame_Full);
+
+        fullSeek.removeEventListener('input', handleSeekInput); // Remove first to prevent duplicates
+        fullSeek.addEventListener('input', handleSeekInput); // Re-enable manual seek
+        fullSeek.removeEventListener('change', handleSeekChange); // Ensure tooltip hiding is active
+        fullSeek.addEventListener('change', handleSeekChange);
+
+        // 4. Play the full animation
+        animation.loop = true; // Ensure looping for full playback
+        animation.resetSegments(true); // Reset again just before playing full
+        mainPlaying = true; // Set flag BEFORE playing
+        animation.goToAndPlay(0, true); // Play from start
+    }
+
+    // 5. Update main button UI
+    mainBtn.classList.toggle('paused', mainPlaying);
+};
+
+
+    function initAnim(data) {
+      segments.length = 0;
+      selectedSegmentId = null;
+      mainPlaying = false;
+      mainBtn.disabled = false;
+      mainBtn.classList.remove('paused'); // Reset button state
+      segmentsContainer.innerHTML = '';
+
+      if (animation) {
+         // Crucially remove old listeners before destroying
+         animation.removeEventListener('DOMLoaded', onDOMLoaded); // Assuming we name the callback
+         animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Full);
+         animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Segment);
+         animation.destroy();
+      }
+
+      const playbackData = JSON.parse(JSON.stringify(data));
+
+      animation = lottie.loadAnimation({
+        container : animationContainer,
+        animationData : playbackData,
+        renderer  : 'svg',
+        loop      : false,
+        autoplay  : false
+      });
+
+      // Name the DOMLoaded callback to remove it later if needed
+      const onDOMLoaded = () => {
+        totalFrames = Math.floor(animation.totalFrames);
+        document.getElementById('fullFramesCount').textContent = `${totalFrames} frames`;
+        fullSeek.max = totalFrames;
+        fullSeek.value = 0;
+
+        // --- Attach Initial Listeners ---
+        fullSeek.removeEventListener('input', handleSeekInput); // Clean up just in case
+        fullSeek.addEventListener('input', handleSeekInput);
+        fullSeek.removeEventListener('change', handleSeekChange); // Clean up tooltip hide listener
+        fullSeek.addEventListener('change', handleSeekChange);   // Add tooltip hide listener
+
+        animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Full); // Clean up
+        animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Segment); // Clean up
+        animation.addEventListener('enterFrame', updateSeekOnEnterFrame_Full); // Default to full update
+
+
+        // Tooltip visibility on hover/focus for the seek bar
+        fullSeek.addEventListener('mouseenter', () => { if (!mainPlaying && selectedSegmentId === null) updateTooltip(fullSeek.value); tooltip.style.display = 'block'; tooltip.style.opacity = '1'; });
+        fullSeek.addEventListener('mouseleave', () => { if (tooltip.style.display === 'block') handleSeekChange();}); // Hide after mouse leaves if it was shown
+         fullSeek.addEventListener('focus', () => { updateTooltip(fullSeek.value); tooltip.style.display = 'block'; tooltip.style.opacity = '1'; });
+         fullSeek.addEventListener('blur', () => { if (tooltip.style.display === 'block') handleSeekChange();}); // Hide after focus leaves if it was shown
+
+
+
+
+
+        document.getElementById('addSegment').disabled = false;
+        document.getElementById('downloadAll').disabled = false;
+        if (Array.isArray(data.markers) && data.markers.length > 0) {
+            loadMarkers(data.markers);
+         } else if (originalData && Array.isArray(originalData.markers) && originalData.markers.length > 0) {
+            // Fallback if playbackData somehow lost markers
+            loadMarkers(originalData.markers);
+         }
+         renderSegments(); // Render even if no markers initially
+         drawGlobalBar();
+      };
+
+      animation.addEventListener('DOMLoaded', onDOMLoaded);
+    }
+
+
+    function loadMarkers(markers) {
+      segments.length = 0; // Clear existing before loading
+      markers.slice(0, maxSegments).forEach((m, i) => {
+        // Adjust for comp inPoint if it exists (often 0, but good practice)
+        const compIp = originalData && typeof originalData.ip === 'number' ? originalData.ip : 0;
+        const start = Math.max(0, Math.floor(m.tm - compIp));
+        const duration = Math.max(1, Math.floor(m.dr));
+        // Ensure end doesn't exceed totalFrames (if already known)
+        const end = totalFrames ? Math.min(totalFrames, start + duration) : (start + duration);
+
+        // Basic validation
+        if (start < end && (!totalFrames || start < totalFrames)) {
+             segments.push({ id: Date.now() + i, start, end, name: m.cm || `Marker ${i+1}`, color: segmentColors[segments.length % segmentColors.length] });
+        } else {
+             console.warn(`Skipping invalid marker: ${m.cm || `Marker ${i+1}`} (tm: ${m.tm}, dr: ${m.dr}) -> start: ${start}, end: ${end}, totalFrames: ${totalFrames}`);
+        }
+
+      });
+      // Don't render/draw here, wait for DOMLoaded where totalFrames is certain
+    }
+
+    document.getElementById('addSegment').onclick = () => {
+        if (segments.length >= maxSegments || !totalFrames) return;
+
+        // --- FLIP Animation for Adding a Segment ---
+
+        // 1. FIRST: Get the initial positions of existing segments
+        const existingSegments = [...segmentsContainer.children];
+        const firstRects = new Map();
+        existingSegments.forEach(segEl => {
+            firstRects.set(segEl, segEl.getBoundingClientRect());
+        });
+
+        // 2. Create the new segment data and DOM element
+        const id = Date.now();
+        const defaultEnd = Math.max(1, Math.min(totalFrames, Math.floor(totalFrames * 0.25)));
+        const newSegData = { id, start: 0, end: defaultEnd, name: `Segment ${segments.length + 1}`, color: segmentColors[segments.length % segmentColors.length] };
+        
+        // Add to the start of the data array to match the DOM prepend
+        segments.unshift(newSegData); 
+
+        const newElement = createSegmentElement(newSegData);
+
+        // 3. LAST: Make the DOM change
+        segmentsContainer.prepend(newElement);
+        updateHighlight(newSegData); // <-- FIX: Update the highlight for the new element
+        attachSingleSegmentHandlers(newElement); // Attach handlers to the new element
+
+        // Style the new element for its "fade/slide in" animation
+        newElement.classList.add('new-segment-enter');
+
+        // 4. INVERT: Calculate the change for all elements
+        const allSegments = [...segmentsContainer.children];
+        allSegments.forEach(segEl => {
+            const firstRect = firstRects.get(segEl);
+            if (firstRect) { // This will be true for existing elements
+                const lastRect = segEl.getBoundingClientRect();
+                const deltaY = firstRect.top - lastRect.top;
+                const deltaX = firstRect.left - lastRect.left;
+                
+                if (deltaY !== 0 || deltaX !== 0) {
+                    segEl.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                    segEl.style.transition = 'transform 0s';
+                }
+            }
+        });
+
+        // 5. PLAY: Remove transforms and trigger animations in the next frame
+        requestAnimationFrame(() => {
+            allSegments.forEach(segEl => {
+                // Animate existing segments to their new position
+                if (firstRects.has(segEl)) {
+                    segEl.style.transition = 'transform 0.4s ease-in-out';
+                    segEl.style.transform = '';
+                    segEl.addEventListener('transitionend', () => { segEl.style.transition = ''; }, { once: true });
+                }
+            });
+
+            // Animate the new segment's entrance
+            requestAnimationFrame(() => {
+                newElement.classList.remove('new-segment-enter');
+            });
+        });
+
+        // Final UI updates
+        drawGlobalBar();
+        updateOverlays();
+    };
+
+    function renderSegments() {
+        segmentsContainer.innerHTML = ''; // Clear existing
+        segments.forEach(seg => {
+            // Create segment control element (ensure totalFrames is available)
+            if (typeof totalFrames !== 'number') {
+                 console.error("Cannot render segments, totalFrames not set.");
+                 return;
+            }
+            const el = createSegmentElement(seg);
+            segmentsContainer.appendChild(el); // Use appendChild for initial render order
+            updateHighlight(seg); // Update highlight after adding
+        });
+
+        // Add event handlers after elements are in the DOM
+        attachSegmentHandlers();
+        updateOverlays(); // ADDED: Update overlays after rendering
+    }
+
+    function createSegmentElement(seg) {
+        const el = document.createElement('div');
+        el.className = 'segment-control';
+        el.style.borderColor = seg.color;
+
+        // Clamp segment start/end to valid frame range on render
+        seg.start = Math.max(0, Math.min(seg.start, totalFrames - 1));
+        seg.end = Math.max(seg.start + 1, Math.min(seg.end, totalFrames));
+
+        el.innerHTML = `
+            <div class="segment-header">
+            <div class="segment-info">
+                <input type="text" class="segment-name" data-id="${seg.id}" value="${seg.name}" />
+                <div class="frame-inputs">
+                <input type="number" class="frame-input" data-id="${seg.id}" data-type="start" value="${seg.start}" min="0" max="${totalFrames - 1}" />
+                <input type="number" class="frame-input" data-id="${seg.id}" data-type="end"   value="${seg.end}"   min="1" max="${totalFrames}" />
+                </div>
+            </div>
+            <div class="segment-handles">
+                <div class="range-container">
+                <div class="range-highlight" id="highlight-${seg.id}" style="background:${seg.color}; border-color:${seg.color};"></div>
+                <input type="range" class="range-input" data-id="${seg.id}" data-type="start" min="0" max="${totalFrames}" value="${seg.start}" />
+                <input type="range" class="range-input" data-id="${seg.id}" data-type="end"   min="0" max="${totalFrames}" value="${seg.end}" />
+                </div>
+            </div>
+            <div class="segment-actions">
+                <button class="play-btn"     data-id="${seg.id}"></button> <button class="download-btn" data-id="${seg.id}"></button> </div>
+                 <button class="close-btn" data-id="${seg.id}" aria-label="Remove segment"></button>
+            </div>
+        `;
+        return el;
+    }
+
+     function attachSegmentHandlers() {
+         segmentsContainer.querySelectorAll('.segment-name').forEach(input => {
+            input.onchange = handleSegmentNameInput; // Use named function
+         });
+         segmentsContainer.querySelectorAll('.frame-input').forEach(input => {
+            input.onchange = handleSegmentFrameInput; // Use named function
+         });
+         segmentsContainer.querySelectorAll('.range-input').forEach(input => {
+            input.oninput = handleSegmentRangeInput; // Use named function
+            // Add 'change' listener maybe? To sync number input after drag?
+            input.onchange = handleSegmentRangeChange;
+         });
+         segmentsContainer.querySelectorAll('.play-btn').forEach(btn => {
+            btn.onclick = handlePlay; // Use the main handlePlay function
+         });
+         segmentsContainer.querySelectorAll('.download-btn').forEach(btn => {
+            btn.onclick = handleDownload; // Use named function
+         });
+
+         /* --- ADD THIS --- */
+   segmentsContainer.querySelectorAll('.close-btn').forEach(btn => {
+       btn.onclick = handleRemoveSegment; // Attach the new handler
+   });
+   /* --------------- */
+
+     }
+
+    function attachSingleSegmentHandlers(segmentElement) {
+        segmentElement.querySelector('.segment-name').onchange = handleSegmentNameInput;
+        segmentElement.querySelectorAll('.frame-input').forEach(input => {
+            input.onchange = handleSegmentFrameInput;
+        });
+        segmentElement.querySelectorAll('.range-input').forEach(input => {
+            input.oninput = handleSegmentRangeInput;
+            input.onchange = handleSegmentRangeChange;
+        });
+        segmentElement.querySelector('.play-btn').onclick = handlePlay;
+        segmentElement.querySelector('.download-btn').onclick = handleDownload;
+        segmentElement.querySelector('.close-btn').onclick = handleRemoveSegment;
+    }
+
+
+
+
+    // --- Event Handlers for Segment Controls ---
+     function handleSegmentNameInput(e) {
+         const segToUpdate = segments.find(s => s.id == e.target.dataset.id);
+         if (!segToUpdate) return;
+
+         const newName = e.target.value;
+         const oldName = segToUpdate.name;
+
+         // Don't do anything if the name hasn't actually changed
+         if (newName === oldName) return;
+
+         // Check for uniqueness (case-insensitive for better UX)
+         const isDuplicate = segments.some(s => s.name.toLowerCase() === newName.toLowerCase() && s.id != segToUpdate.id);
+
+         if (isDuplicate) {
+             alert(`Segment name "${newName}" is already in use. Please choose a unique name.`);
+             e.target.value = oldName; // Revert the input field to the old name
+         } else {
+             segToUpdate.name = newName; // Update the name in the data model
+         }
+     }
+
+     function handleSegmentFrameInput(e) {
+         const seg = segments.find(s => s.id == e.target.dataset.id);
+         if (!seg || !totalFrames) return;
+         const type = e.target.dataset.type;
+         let val = Math.floor(+e.target.value);
+
+         if (type === 'start') {
+             val = Math.max(0, Math.min(val, totalFrames - 1)); // Clamp start frame
+             seg.start = Math.min(val, seg.end - 1); // Ensure start < end
+         } else { // type === 'end'
+             val = Math.max(1, Math.min(val, totalFrames)); // Clamp end frame
+             seg.end = Math.max(val, seg.start + 1); // Ensure end > start
+         }
+         // Ensure values don't cross after clamping
+         seg.start = Math.min(seg.start, seg.end - 1);
+         seg.end = Math.max(seg.end, seg.start + 1);
+          fullSeek.value = val;
+            animation.goToAndStop(val, true);
+
+         syncSegmentUI(seg); // Update sliders and highlights
+         drawGlobalBar(); // Update main bar visualization
+     }
+
+     function handleSegmentRangeInput(e) {
+       animation.resetSegments(true);
+         const seg = segments.find(s => s.id == e.target.dataset.id);
+          if (!seg || !totalFrames) return;
+         const type = e.target.dataset.type;
+         const val = Math.floor(+e.target.value);
+
+         if (type === 'start') {
+             seg.start = Math.min(val, seg.end - 1); // Allow temporary overlap during drag
+         } else { // type === 'end'
+             seg.end = Math.max(val, seg.start + 1);
+         }
+
+         // --- ADD THESE LINES ---
+         if (animation && val >= 0 && val <= totalFrames) {
+             // 1. Update the main seek bar's value
+             fullSeek.value = val;
+
+             // 2. Go to the corresponding frame in the animation preview
+             animation.goToAndStop(val, true);
+             console.log('here');
+             // 3. Update and show the tooltip for the main seek bar
+             updateTooltip(val);
+             tooltip.style.display = 'block'; // Make tooltip visible
+             tooltip.style.opacity = '1';    // Ensure it's fully opaque
+         }
+         // ---------------------
+
+
+
+         syncSegmentUI(seg); // Update number inputs and highlights during drag
+         // Don't update global bar on every input event, maybe only on 'change'
+     }
+
+    function handleSegmentRangeChange(e) {
+        // This fires after the user releases the slider thumb
+        const seg = segments.find(s => s.id == e.target.dataset.id);
+        if (!seg || !totalFrames) return;
+
+        // Final validation and clamping after drag ends
+        seg.start = Math.max(0, Math.min(seg.start, totalFrames - 1));
+        seg.end = Math.max(seg.start + 1, Math.min(seg.end, totalFrames));
+        seg.start = Math.min(seg.start, seg.end - 1); // Final cross-check
+
+        syncSegmentUI(seg); // Ensure final state is synced
+        drawGlobalBar(); // Update global bar now
+
+        // If this segment was playing, restart it with new values? Or just stop?
+        // For simplicity, let's not automatically restart/stop here.
+        // if (selectedSegmentId === seg.id) {
+        //    playSeg(seg); // Option: restart playback
+        // }
+    }
+
+
+    function syncSegmentUI(seg) {
+        // Update range sliders
+        document.querySelector(`.range-input[data-id='${seg.id}'][data-type='start']`).value = seg.start;
+        document.querySelector(`.range-input[data-id='${seg.id}'][data-type='end']`).value = seg.end;
+        // Update number inputs
+        document.querySelector(`.frame-input[data-id='${seg.id}'][data-type='start']`).value = seg.start;
+        document.querySelector(`.frame-input[data-id='${seg.id}'][data-type='end']`).value = seg.end;
+        // Update highlight bar
+        updateHighlight(seg);
+    }
+
+
+    // --- Playback Handling ---
+
+    function handlePlay(e) {
+        const id = +e.target.dataset.id;
+        const segmentButton = e.target;
+        const segmentToPlay = segments.find(s => s.id === id);
+
+
+        if (!segmentToPlay || !animation) return; // Exit if segment or animation not found
+
+        // If main animation is playing, stop it FIRST
+        if (mainPlaying) {
+            mainBtn.click(); // This handles state update, listener swap, and pausing
+        }
+
+        // --- Logic when clicking the button of the ALREADY selected/playing segment ---
+        if (selectedSegmentId === id) {
+            animation.pause(); // Pause playback
+
+            // Restore default listeners
+            animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Segment);
+            animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Full); // Clean first
+            animation.addEventListener('enterFrame', updateSeekOnEnterFrame_Full);
+            fullSeek.removeEventListener('input', handleSeekInput); // Clean first
+            fullSeek.addEventListener('input', handleSeekInput);    // Re-enable manual seek
+            fullSeek.removeEventListener('change', handleSeekChange); // Re-enable tooltip hide
+            fullSeek.addEventListener('change', handleSeekChange);
+
+            selectedSegmentId = null; // Deselect
+            segmentButton.classList.remove('paused'); // Update button UI
+             // animation.resetSegments(true); // Maybe reset state on pause? Optional.
+
+        // --- Logic when clicking a NEW segment's button (or the first time) ---
+        } else {
+            // If another segment was active, clean it up first
+            if (selectedSegmentId !== null) {
+                 animation.pause(); // Pause previous segment
+                 animation.resetSegments(true); // Reset lottie state
+                 // Deactivate previous button visually
+                 const previousButton = document.querySelector(`.play-btn.paused[data-id='${selectedSegmentId}']`);
+                 if (previousButton) {
+                    previousButton.classList.remove('paused');
+                 }
+                 // Ensure default listeners are active before switching
+                 animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Segment);
+                 animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Full);
+                 animation.addEventListener('enterFrame', updateSeekOnEnterFrame_Full);
+                 fullSeek.removeEventListener('input', handleSeekInput);
+                 fullSeek.addEventListener('input', handleSeekInput);
+                 fullSeek.removeEventListener('change', handleSeekChange);
+                 fullSeek.addEventListener('change', handleSeekChange);
+            }
+
+            // Now set up for the new segment
+            selectedSegmentId = id;
+
+            // Deactivate all other play buttons visually
+            document.querySelectorAll('.segment-actions .play-btn').forEach(btn => {
+                if (btn !== segmentButton) {
+                    btn.classList.remove('paused');
+                }
+            });
+            segmentButton.classList.add('paused'); // Activate current button
+
+            // Swap to segment-specific listeners
+            fullSeek.removeEventListener('input', handleSeekInput); // Disable manual seek
+            fullSeek.removeEventListener('change', handleSeekChange); // Disable tooltip hide on change
+            animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Full);
+            animation.addEventListener('enterFrame', updateSeekOnEnterFrame_Segment); // Enable segment update logic
+
+            animation.loop = true; // Segments loop by default in this logic
+
+            playSeg(segmentToPlay); // Play the selected segment
+        }
+    }
+
+    // Play segment function (remains simple)
+    function playSeg(seg) {
+      if (!animation) return;
+      animation.resetSegments(true);
+      console.log(`Playing frames ${seg.start} to ${seg.end}`);
+        const addNumber = originalData.ip;
+
+      // Ensure segment bounds are valid before playing
+      const safeStart = seg.start + addNumber;
+      const safeEnd = seg.end+ addNumber;
+        console.log(`Playing frames add number ${safeStart} to ${safeEnd}`);
+   // Go to the validated start frame
+      animation.playSegments([safeStart, safeEnd], true); // Play the validated segment
+    }
+
+
+    // --- UI Update Functions ---
+
+    function updateHighlight(seg) {
+      const hl = document.getElementById(`highlight-${seg.id}`);
+      if (hl && typeof totalFrames === 'number' && totalFrames > 0) {
+        const startPercent = (seg.start / totalFrames) * 100;
+        const widthPercent = ((seg.end - seg.start) / totalFrames) * 100;
+        hl.style.left = `${startPercent}%`;
+        hl.style.width = `${widthPercent}%`;
+      } else if (!hl) {
+         console.warn(`Highlight element not found for segment ID: highlight-${seg.id}`);
+      }
+    }
+
+    function drawGlobalBar() {
+      const bar = document.getElementById('globalBar');
+      if (!bar || typeof totalFrames !== 'number' || totalFrames <= 0) return;
+      bar.innerHTML = ''; // Clear previous divs
+      segments.forEach(seg => {
+        const d = document.createElement('div');
+        d.style.position = 'absolute';
+        const startPercent = (seg.start / totalFrames) * 100;
+        const widthPercent = ((seg.end - seg.start) / totalFrames) * 100;
+        d.style.left = `${startPercent}%`;
+        d.style.width = `${widthPercent}%`;
+        d.style.height = '100%';
+        d.style.background = seg.color;
+
+        d.style.borderRadius = '4px'; // Match track radius
+        d.style.pointerEvents = 'none'; // Prevent interaction
+        bar.appendChild(d);
+      });
+    }
+
+    // --- Download Functions ---
+
+    document.getElementById('downloadAll').onclick = () => {
+        if (!originalData) return;
+        const mod = stripRuntimeFlags(JSON.parse(JSON.stringify(originalData)));
+         // Ensure ip exists, default to 0 if not
+         const compIp = typeof mod.ip === 'number' ? mod.ip : 0;
+        mod.markers = segments.map(s => ({
+            cm: s.name,
+            tm: s.start + compIp, // Add composition inPoint back for standard marker time
+            dr: s.end - s.start
+        }));
+        let baseFilename = originalFilename.replace(/\.json$/i, '');
+
+          // 2. Get sanitized marker names
+          const markerNames = segments.map(s => sanitizeName(s.name)).join('_');
+
+          // 3. Combine parts
+          let finalFilename = `${baseFilename}`;
+          if (markerNames) { // Only add marker names if there are segments
+              finalFilename += `_${markerNames}`;
+          }
+          finalFilename += '.json'; // Add extension back
+          // --- END: Generate New Filename ---
+
+
+          // --- Use the new filename in the download function ---
+          // downloadJSON(mod, 'animation_with_markers.json'); // Old way
+          downloadJSON(mod, finalFilename); // New way
+    };
+
+    function handleDownload(e) {
+        if (!originalData) return;
+        const seg = segments.find(s => s.id == e.target.dataset.id);
+        if (!seg) return;
+
+        const mod = stripRuntimeFlags(JSON.parse(JSON.stringify(originalData)));
+
+
+
+        mod.op = mod.ip + seg.end - seg.start;
+          console.log('stardsting point is' +mod.ip);
+        /*
+        // Set new inPoint and outPoint for the trimmed animation
+        mod.ip = 0; // New animation starts at frame 0 of the segment
+        mod.op = seg.end - seg.start; // New animation ends at the duration of the segment
+
+        // Adjust all keyframe times ('t' property) within the layers
+        if (Array.isArray(mod.layers)) {
+            mod.layers.forEach(layer => {
+                adjustKeyframeTimes(layer, seg.start);
+            });
+        }
+
+        // Optional: Add a single marker relative to the new timeline
+        mod.markers = [{ cm: seg.name, tm: 0, dr: seg.end - seg.start }];
+        */
+
+
+          mod.markers = [{ cm: seg.name, tm: seg.start, dr: seg.end }];
+        let baseFilename = originalFilename.replace(/\.json$/i, '');
+
+       // 2. Construct the filename using the new format
+
+
+        // Generate filename, sanitize segment name
+        const safeName = seg.name.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
+
+        downloadJSON(mod, `${baseFilename}_${safeName}_${seg.start}_${seg.end}.json`);
+    }
+
+     // Recursive function to adjust keyframe times
+     function adjustKeyframeTimes(obj, offset) {
+         if (!obj || typeof obj !== 'object') {
+             return;
+         }
+
+         // Adjust 't' property if it exists and is a number (start time for keyframe)
+         if (typeof obj.t === 'number') {
+             obj.t -= offset;
+             // Optional: Clamp to 0 if negative, though should usually align if data is consistent
+             // obj.t = Math.max(0, obj.t);
+         }
+
+         // Recursively process nested properties/arrays
+         for (const key in obj) {
+             if (obj.hasOwnProperty(key)) {
+                 if (Array.isArray(obj[key])) {
+                     obj[key].forEach(item => adjustKeyframeTimes(item, offset));
+                 } else if (typeof obj[key] === 'object') {
+                     adjustKeyframeTimes(obj[key], aoffset);
+                 }
+             }
+         }
+
+         // Adjust layer inPoint and outPoint
+         if (typeof obj.ip === 'number') {
+             obj.ip -= offset;
+         }
+          if (typeof obj.op === 'number') {
+             obj.op -= offset;
+         }
+          // Optional: Clamp layer ip/op based on new animation duration? More complex.
+     }
+
+
+    function stripRuntimeFlags(obj) {
+      if (Array.isArray(obj)) {
+        return obj.map(stripRuntimeFlags);
+      }
+      if (obj && typeof obj === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(obj)) {
+          // Keep common properties, remove Lottie-web internal state flags
+          if (!k.startsWith('__') && k !== 'live' && k !== 'isFrozen') {
+             out[k] = stripRuntimeFlags(v);
+          }
+        }
+        return out;
+      }
+      return obj; // Primitives
+    }
+
+    function downloadJSON(data, filename) {
+      try {
+          const jsonString = JSON.stringify(data); // Pretty print JSON
+          const blob = new Blob([jsonString], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }, 100);
+      } catch (error) {
+          console.error("Failed to stringify or download JSON:", error);
+          // Provide user feedback?
+      }
+    }
+
+    // --- Initial Load ---
+    setTimeout(() => {
+      if (!originalData) {
+        fetch('default.json') // Make sure default.json exists in the same directory
+          .then(res => {
+             if (!res.ok) {
+                 throw new Error(`HTTP error! status: ${res.status}`);
+             }
+             return res.json();
+          })
+          .then(data => {
+            originalData = data;
+            initAnim(data); // Initialize with default data
+          })
+          .catch(err => console.error('Failed to load default.json:', err));
+      }
+    }, 300); // Delay slightly to allow potential message listener to receive data first
+
+    function handleRemoveSegment(e) {
+    const idToRemove = +e.target.dataset.id;
+    const segmentIndex = segments.findIndex(s => s.id === idToRemove);
+
+    if (segmentIndex > -1) {
+        // Remove from the JavaScript array
+        segments.splice(segmentIndex, 1);
+
+        // Remove the element from the DOM
+        const segmentElement = e.target.closest('.segment-control');
+        if (segmentElement) {
+            segmentElement.remove();
+        }
+
+        // If the removed segment was the currently playing one, stop playback
+        if (selectedSegmentId === idToRemove) {
+            animation.pause();
+            animation.resetSegments(true);
+            selectedSegmentId = null;
+            // Reset main play button if it was paused due to segment play
+             mainBtn.classList.remove('paused'); // Assuming mainBtn is accessible
+            // Restore default listeners if needed (similar to handlePlay logic)
+            animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Segment);
+            animation.removeEventListener('enterFrame', updateSeekOnEnterFrame_Full);
+            animation.addEventListener('enterFrame', updateSeekOnEnterFrame_Full);
+            fullSeek.removeEventListener('input', handleSeekInput);
+             fullSeek.addEventListener('input', handleSeekInput);
+             fullSeek.removeEventListener('change', handleSeekChange);
+             fullSeek.addEventListener('change', handleSeekChange);
+
+
+        }
+
+        // Redraw the global bar visualization
+        drawGlobalBar();
+        updateOverlays(); // ADDED: Update overlays after removing a segment
+
+         // Optional: Re-assign colors if you want them to redistribute
+         // segments.forEach((seg, i) => seg.color = segmentColors[i % segmentColors.length]);
+         // renderSegments(); // Re-render all segments if colors changed (might be overkill)
+
+         // Re-enable add segment button if max was reached
+         document.getElementById('addSegment').disabled = segments.length >= maxSegments;
+
+
+    } else {
+        console.warn("Segment to remove not found in data:", idToRemove);
+    }
+}
+
+ function handleApplyAndClose() {
+    if (!originalData) {
+        alert('No Lottie data loaded.');
+        return;
+    }
+
+    // This logic is the same as your 'downloadAll' function,
+    // but instead of downloading, it prepares the data to be sent.
+    const mod = stripRuntimeFlags(JSON.parse(JSON.stringify(originalData)));
+
+    // Ensure ip exists, default to 0 if not
+    const compIp = typeof mod.ip === 'number' ? mod.ip : 0;
+
+    // Create the new markers array from the current segments
+    mod.markers = segments.map(s => ({
+        cm: s.name,
+        tm: s.start + compIp, // Add composition inPoint back for standard marker time
+        dr: s.end - s.start
+    }));
+
+    // Post the message to the parent window
+    window.parent.postMessage({
+        type: 'dataFromTrimTool', // A unique type for this tool
+        lottieData: mod,
+        originalFilename: rawOriginalFileName // Send the filename back for identification
+    }, '*'); // Use a specific origin in production for security!
+}
+
+
+window.addEventListener('message', (event) => {
+    // Check for the same message type used for the crop tool and asset replacer
+    if (event.data.type === 'triggerSaveAndCloseCrop') {
+        console.log('Received generic save trigger from parent. Clicking internal apply/close button.');
+        // Find the button inside overlay.js and click it
+        const saveButton = document.getElementById('applyAndCloseBtn');
+        if (saveButton) {
+            //saveButton.click();
+             handleApplyAndClose();
+            console.log('save button clicked');
+        } else {
+            console.error('Could not find the internal apply/close button to click.');
+        }
+    }
+});
+
+
+// --- NEW --- Functions to handle segment overlays and reordering
+function updateOverlays() {
+    const segmentElements = segmentsContainer.querySelectorAll('.segment-control');
+    segmentElements.forEach((segEl, index) => {
+        let overlay = segEl.querySelector('.segment-overlay');
+        const segmentNameInput = segEl.querySelector('.segment-name');
+        const segmentName = segmentNameInput ? segmentNameInput.value : '';
+
+        if (index === 0) {
+            // This is the first/active segment, remove its overlay if it exists
+            if (overlay) {
+                overlay.remove();
+            }
+        } else {
+            // This is not the first segment, add or update an overlay
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.className = 'segment-overlay';
+                segEl.appendChild(overlay);
+            }
+            // Default overlay
+            overlay.innerHTML = 'Click to edit this segment';
+            overlay.classList.remove('locked'); // Ensure locked class is removed for others
+        }
+    });
+}
+
+function handleOverlayClick(e) {
+    const overlay = e.target.closest('.segment-overlay');
+    if (!overlay || overlay.classList.contains('locked')) return;
+
+    const clickedSegment = overlay.closest('.segment-control');
+    const container = clickedSegment.parentNode;
+    if (!clickedSegment || !container) return;
+ 
+    // FLIP Animation: First, Last, Invert, Play
+    // 1. Get the 'First' position of all segments
+    const segments = [...container.children];
+    const firstRects = new Map();
+    segments.forEach(seg => {
+        firstRects.set(seg, seg.getBoundingClientRect());
+    });
+
+    // 2. Do the 'Last' DOM change
+    container.prepend(clickedSegment);
+
+    // 3. 'Invert' the position change for all segments
+    segments.forEach(seg => {
+        const firstRect = firstRects.get(seg);
+        const lastRect = seg.getBoundingClientRect();
+        const deltaY = firstRect.top - lastRect.top;
+        const deltaX = firstRect.left - lastRect.left;
+
+        seg.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+        seg.style.transition = 'transform 0s';
+    });
+
+    // 4. 'Play' the animation by removing the transforms in the next frame
+    requestAnimationFrame(() => {
+        segments.forEach(seg => {
+            seg.style.transition = 'transform 0.4s ease-in-out';
+            seg.style.transform = ''; // Animate to final position (0,0)
+
+            // Add a listener for when the transition finishes
+            seg.addEventListener('transitionend', () => {
+                // Clean up inline styles
+                seg.style.transition = '';
+
+                // If this is the segment that was clicked, trigger the blink animation now
+                if (seg === clickedSegment) {
+                    seg.classList.add('is-blinking');
+                    seg.addEventListener('animationend', () => seg.classList.remove('is-blinking'), { once: true });
+                }
+            }, { once: true });
+        });
+        // Update overlays after the animation starts, not after it ends
+        updateOverlays();
+    });
+
+    // Scroll the entire page to the top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Attach the main event listener for the overlays
+segmentsContainer.addEventListener('click', handleOverlayClick);

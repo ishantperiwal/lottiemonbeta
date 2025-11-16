@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lottie State Machine Extractor</title>
+    <!-- Tailwind CSS for basic styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JSZip library - required by lottieConverter.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body {
+            font-family: "Inter", sans-serif;
+            background-color: #f0f4f8; /* Light blue-gray background */
+        }
+        pre {
+            white-space: pre-wrap; /* Ensures long lines wrap */
+            word-wrap: break-word; /* Breaks long words */
+            background-color: #e2e8f0; /* Lighter background for code blocks */
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto; /* Allows horizontal scrolling for very long lines */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">Extract Lottie State Machine JSONs</h1>
+
+        <div class="mb-6">
+            <label for="lottieFileInput" class="block text-gray-700 text-sm font-semibold mb-2">
+                Upload a .lottie file:
+            </label>
+            <input
+                type="file"
+                id="lottieFileInput"
+                accept=".lottie"
+                class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            >
+        </div>
+
+        <div id="loadingIndicator" class="hidden text-center text-blue-600 font-medium mb-4">
+            Processing .lottie file...
+        </div>
+
+        <div id="resultsContainer" class="mt-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Extracted State Machine JSONs:</h2>
+            <div id="jsonOutput" class="space-y-4">
+                <p class="text-gray-500">Upload a .lottie file to see the extracted JSON data here.</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import the functions from lottieConverter.js
+        // In a real-world scenario, you would have lottieConverter.js as a separate file
+        // and import it like: import { extractStateMachineJson } from './lottieConverter.js';
+        // For this example, we'll include the function directly or assume it's globally available
+        // if this script is loaded after lottieConverter.js in a non-module context.
+
+        // For demonstration purposes, I'm including the function directly as if it were part of this script
+        // or assuming lottieConverter.js is loaded as a regular script before this module script.
+        // If lottieConverter.js is a module, you'd need a build step or to adjust the import path.
+
+        // --- Start of extractStateMachineJson function (copied for self-containment) ---
+        /**
+         * Reads a File object as an ArrayBuffer.
+         * @param {File} file - The file to read.
+         * @returns {Promise<ArrayBuffer>} A promise that resolves with the ArrayBuffer.
+         */
+        function readFileAsArrayBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        /**
+         * Extracts and parses all JSON files located in the 'states/' directory within a .lottie archive.
+         * @param {File} dotLottieFile - The .lottie file (zip archive) to process.
+         * @returns {Promise<Array<object>>} A promise that resolves with an array of parsed JSON objects
+         * found in the 'states/' directory. Returns an empty array if no
+         * JSON files are found or if JSZip is not loaded.
+         */
+        async function extractStateMachineJson(dotLottieFile) {
+            if (typeof JSZip === 'undefined') {
+                console.error("JSZip library is not loaded. Please ensure it's available in the global scope.");
+                return [];
+            }
+
+            const arrayBuffer = await readFileAsArrayBuffer(dotLottieFile);
+            const zip = new JSZip();
+            const loadedZip = await zip.loadAsync(arrayBuffer);
+
+            const stateMachineJsons = [];
+
+            // Iterate over all files in the loaded zip archive
+            for (const filename in loadedZip.files) {
+                const fileEntry = loadedZip.files[filename];
+
+                // Check if the file is not a directory and is located within the 'states/' folder
+                // and ends with '.json'
+                if (!fileEntry.dir && filename.startsWith('states/') && filename.endsWith('.json')) {
+                    try {
+                        const jsonContent = await fileEntry.async('text');
+                        stateMachineJsons.push(JSON.parse(jsonContent));
+                    } catch (e) {
+                        console.warn(`Could not parse JSON file from states/: ${filename}`, e);
+                    }
+                }
+            }
+
+            return stateMachineJsons;
+        }
+        // --- End of extractStateMachineJson function ---
+
+
+        const fileInput = document.getElementById('lottieFileInput');
+        const jsonOutputDiv = document.getElementById('jsonOutput');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        fileInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) {
+                jsonOutputDiv.innerHTML = '<p class="text-gray-500">No file selected.</p>';
+                return;
+            }
+
+            // Show loading indicator
+            loadingIndicator.classList.remove('hidden');
+            jsonOutputDiv.innerHTML = ''; // Clear previous results
+
+            try {
+                // Call the extractStateMachineJson function
+                const extractedJsons = await extractStateMachineJson(file);
+
+                if (extractedJsons.length > 0) {
+                    jsonOutputDiv.innerHTML = ''; // Clear placeholder
+                    extractedJsons.forEach((jsonData, index) => {
+                        const pre = document.createElement('pre');
+                        pre.classList.add('bg-blue-50', 'text-blue-800', 'p-4', 'rounded-md', 'shadow-sm');
+                        pre.textContent = `--- State Machine JSON ${index + 1} ---\n` + JSON.stringify(jsonData, null, 2);
+                        jsonOutputDiv.appendChild(pre);
+                    });
+                } else {
+                    jsonOutputDiv.innerHTML = '<p class="text-gray-500">No JSON files found in the "states/" directory.</p>';
+                }
+            } catch (error) {
+                console.error('Error processing .lottie file:', error);
+                jsonOutputDiv.innerHTML = `<p class="text-red-600">Error: ${error.message}. Please check the console for more details.</p>`;
+            } finally {
+                // Hide loading indicator
+                loadingIndicator.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+npm install javascript-obfuscator terser
+node obf.js

@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-white text-gray-900">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DotLottie Layout Editor</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <style>
+        /* Base styles */
+        body {
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevent all scrolling */
+        }
+
+        /* Viewport for centering the composition area */
+        #viewport {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px; /* Some padding from screen edges */
+            padding-bottom: 60px;
+            box-sizing: border-box;
+            background-color: #f3f4f6; /* bg-gray-100 */
+        }
+
+        /* The main composition area that holds the BG and Lottie */
+        #composition-area {
+            position: relative;
+            /* These ensure it fits within the viewport */
+            max-width: 100%;
+            max-height: 100%;
+            /* Aspect ratio will be set by JS */
+            box-shadow: none; /* Lighter shadow */ /* <--- 1. REMOVED SHADOW */
+            background-color: #ffffff; /* bg-white */
+            /* Default checkerboard for when bg is loading */
+            background-image:
+                linear-gradient(45deg, #e5e7eb 25%, transparent 25%),
+                linear-gradient(-45deg, #e5e7eb 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #e5e7eb 75%),
+                linear-gradient(-45deg, transparent 75%, #e5e7eb 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            
+            /* --- ADDED DEFAULTS --- */
+            width: 700px; /* Default width */
+            max-width: 100%; /* Ensure it fits viewport (was already present) */
+            aspect-ratio: 1/1; /* Default to square */
+            border-radius: 16px;
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 240ms ease-in-out;
+        }
+        
+        /* The canvas for the background image */
+        #bg-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Wrapper for the Lottie. This is what we drag/resize */
+        #lottie-wrapper {
+            position: absolute;
+            width: auto; /* Will be set by JS */
+            height: auto; /* Will be set by JS */
+            display: none; /* Hidden until Lottie is loaded */
+            /* Aspect ratio will be set by JS */
+            opacity: 0;
+            transition: opacity 400ms ease-in-out;
+        }
+
+        /* The Lottie canvas fills its wrapper */
+        #lottie-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        /* Styles for the "Move Mode" */
+        #lottie-wrapper.move-mode {
+            border: 2px dashed #3b82f6; /* blue-500 */
+            cursor: move;
+            z-index: 10;
+        }
+
+        /* The resize handle */
+        .resize-handle {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            background: #3b82f6;
+            border: 2px solid white;
+            border-radius: 50%;
+            bottom: -7px;
+            right: -7px;
+            cursor: se-resize;
+            display: none; /* Hidden by default */
+        }
+
+        #lottie-wrapper.move-mode .resize-handle {
+            display: block; /* Show handle only in move mode */
+        }
+        
+        /* Toolbar for controls */
+        #toolbar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 10px;
+            background-color: rgba(255, 255, 255, 0.8); /* bg-white/80 */
+            padding: 8px;
+            border-radius: 99px;
+            backdrop-filter: blur(8px);
+            border: 1px solid #e5e7eb; /* bg-gray-200 */
+        }
+
+        /* Shared button style */
+        .tool-btn {
+            background-color: #f3f4f6; /* bg-gray-100 */
+            color: #1f2937; /* bg-gray-800 */
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+        .tool-btn:hover {
+            background-color: #e5e7eb; /* bg-gray-200 */
+        }
+        .tool-btn.active {
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+        }
+        .tool-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Hide "move" and "apply" until BG is loaded */
+        .editor-tool {
+            display: none;
+        }
+        body.editor-active .editor-tool {
+            display: flex;
+        }
+
+        /* This is the new Lottie upload button, hidden by default */
+        #lottie-upload-label {
+            display: none;
+        }
+
+        /* --- 2. HIDE APPLY BUTTON BY DEFAULT --- */
+        #apply-btn {
+            display: none;
+        }
+
+        #toolbar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            /* ... existing styles ... */
+        }
+
+        /* NEW: Reset Button (Top Right) */
+        #reset-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+
+
+        #fallback-loader {
+            display: none; /* Hidden by default */
+            position: absolute;
+            top: 80px;
+            left: 20px;
+            z-index: 100;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 12px;
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
+            border: 1px solid #e5e7eb;
+            width: 250px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        .fallback-title {
+            font-size: 0.875rem; /* text-sm */
+            font-weight: 600; /* font-semibold */
+            color: #374151; /* text-gray-700 */
+            margin-bottom: 8px;
+        }
+        #json-input-area {
+            width: 100%;
+            height: 120px;
+            border: 1px solid #d1d5db; /* border-gray-300 */
+            border-radius: 8px;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            resize: vertical;
+            margin-bottom: 8px;
+        }
+        #fallback-loader #load-json-btn {
+            width: 100%; /* Make button full-width */
+            height: 40px;
+            border-radius: 8px; /* Match textarea */
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+        }
+        #fallback-loader #load-json-btn:hover {
+            background-color: #2563eb; /* blue-600 */
+        }
+
+
+        #download-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+            display: none;
+        }
+
+
+    </style>
+</head>
+<body class="h-full">
+    <div id="loader-overlay" class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-gray-100">
+    <i class="fa-solid fa-spinner fa-spin text-4xl text-blue-500"></i>
+    <p class="mt-4 text-gray-600">Loading State Machine Runner...</p>
+</div>
+    <!-- Toolbar -->
+    <div id="toolbar">
+        <!-- Background Upload -->
+        <label for="bg-upload" class="tool-btn" title="Upload Background">
+            <i class="fa-solid fa-image"></i>
+        </label>
+        <input type="file" id="bg-upload" accept="image/*" class="hidden">
+
+        <!-- NEW: Lottie Upload (Fallback) -->
+        <label for="lottie-upload" class="tool-btn" id="lottie-upload-label" title="Upload Lottie">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+        </label>
+        <input type="file" id="lottie-upload" accept=".lottie" class="hidden">
+
+        <!-- Move Tool -->
+        <button id="move-tool" class="tool-btn editor-tool" title="Move/Resize Lottie" disabled>
+            <i class="fa-solid fa-arrows-up-down-left-right"></i>
+        </button>
+        <button id="cursor-tool" class="tool-btn editor-tool" title="Toggle Custom Cursor (Shift+Click to Upload New)" disabled>
+    <i class="fa-solid fa-arrow-pointer"></i>
+</button>
+       <input type="file" id="cursor-upload" accept="image/svg+xml" class="hidden">
+        <!-- Apply -->
+        <button id="apply-btn" class="tool-btn" title="Apply"> <!-- <--- 2. REMOVED 'editor-tool' CLASS -->
+            <i class="fa-solid fa-check"></i>
+        </button>
+    </div>
+
+
+    <div id="fallback-loader">
+        <h3 class="fallback-title">Fallback Mode</h3>
+        <textarea id="json-input-area" placeholder="Paste combined layout JSON here..."></textarea>
+        <button id="load-json-btn" class="tool-btn" title="Load JSON">
+            <i class="fa-solid fa-upload"></i>
+        </button>
+    </div>
+
+    <!-- Viewport holds the composition area -->
+    <div id="viewport">
+        <!-- Composition Area (scales to fit viewport) -->
+        <button id="reset-btn" class="tool-btn" title="Reset State Machine" disabled>
+            <i class="fa-solid fa-arrow-rotate-right"></i>
+        </button>
+
+        <button id="download-btn" class="tool-btn" title="Download .lottie file" disabled>
+            <i class="fa-solid fa-download"></i>
+        </button>
+
+
+        <div id="composition-area">
+            
+            <!-- 1. Background Canvas -->
+            <canvas id="bg-canvas"></canvas>
+            
+            <!-- 2. Lottie Wrapper (for drag/resize) -->
+            <div id="lottie-wrapper">
+                <!-- 2a. Lottie Canvas (where it plays) -->
+                <canvas id="lottie-canvas"></canvas>
+                <!-- 2b. Resize Handle -->
+                <div class="resize-handle"></div>
+            </div>
+
+        </div>
+    </div>
+
+
+    <script type="module">
+        import { DotLottie } from "https://cdn.jsdelivr.net/npm/@lottiefiles/dotlottie-web/+esm";
+        import JSZip from "https://esm.sh/jszip"; 
+        const DEFAULT_CURSOR_DATA_URL = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTcuODI4IDMuNDE0YTEgMSAwIDAgMCAwIDEuNDE0bDEwLjUgMTAuNUw0LjU4NiAyOS4xN2ExIDEgMCAwIDAgMS40MTQgMS40MTRMMTkuNzU3IDE2Ljg1OEwxNi4yMjIgMTMuMzIzbDExLjQ4IDQuMDQzYTEgMSAwIDAgMCAxLjE5LTEuMTlsLTQuMDQyLTExLjQ4TDMyIDBMMTguNjM2IDQuMzY0TDcuODI4IDMuNDE0WiIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==';
+       function generateLottieManifest(animations, stateMachineId) {
+            // Dynamically create an entry for each animation being bundled.
+            const animationEntries = animations.map(anim => ({ id: anim.id }));
+
+            return {
+                version: "2",
+                generator: "@dotlottie/dotlottie-js@1.3.1",
+                animations: animationEntries, // Use the dynamically generated array
+                stateMachines: [
+                    { id: stateMachineId } // Use the passed stateMachineId
+                ]
+            };
+        }
+
+        /**
+         * Creates a .lottie dataUrl from raw JSON objects using JSZip
+         * @param {object} animation
+         * @param {object} stateMachine
+         * @returns {Promise<string>} A base64 data URL
+         */
+      /**
+         * Creates a .lottie dataUrl from raw JSON objects using JSZip
+         * @param {object} animation
+         * @param {object} stateMachine
+         * @returns {Promise<string>} A base64 data URL
+         */
+      async function buildLottieDataUrl(animation, stateMachine) {
+            console.log("Building .lottie dataUrl with JSZip...");
+
+            const ANIMATION_ID = 'animation'; // This is the ID we will use
+            const STATEMACHINE_ID = 'stateMachine';
+
+            // --- Create a deep copy to avoid modifying the original sourceStateMachineJson
+            const stateMachineForZip = JSON.parse(JSON.stringify(stateMachine));
+
+            // --- MODIFIED: Set state animation property ---
+            console.log(`Modifying state machine for zip: setting state animations to '${ANIMATION_ID}'`);
+            if (stateMachineForZip.states) {
+                for (const stateName in stateMachineForZip.states) {
+                    if (Object.hasOwnProperty.call(stateMachineForZip.states, stateName)) {
+                        const state = stateMachineForZip.states[stateName];
+                        
+                        // Set the 'animation' property to "animation"
+                        state.animation = ANIMATION_ID; 
+                    }
+                }
+            }
+            // --- END MODIFICATION ---
+
+            const zip = new JSZip();
+
+            // 1. Create the manifest
+            // --- FIX: Corrected function name typo ---
+          const manifest = generateLottieManifest([{ id: ANIMATION_ID }], STATEMACHINE_ID);
+            zip.file("manifest.json", JSON.stringify(manifest));
+
+            // 2. Create the animations folder and file
+            // --- FIX: Use 'a/' to match the parent tool ---
+            const animationPath = `a/${ANIMATION_ID}.json`;
+            zip.file(animationPath, JSON.stringify(animation));
+
+            // 3. Create the stateMachines folder and file
+            // --- FIX: Use 's/' to match the parent tool ---
+            const stateMachinePath = `s/${STATEMACHINE_ID}.json`;
+            
+            // --- Use the modified copy ---
+            zip.file(stateMachinePath, JSON.stringify(stateMachineForZip));
+
+            // 4. Generate the zip as a base64 string
+            const base64content = await zip.generateAsync({
+                type: "base64",
+                mimeType: "application/zip"
+            });
+            
+            const dataUrl = `data:application/zip;base64,${base64content}`;
+            
+            console.log(".lottie dataUrl built successfully with JSZip.");
+            
+            // --- START: MODIFICATION ---
+            // Set the global dataUrl so the download function can access it
+            lottieDataUrl = dataUrl;
+            
+            // Enable the manual download button (in case the player fails to load)
+            downloadBtn.disabled = false; 
+
+            // Trigger the download immediately
+            //downloadCurrentLottie();
+            // --- END: MODIFICATION ---
+
+            return dataUrl;
+        }
+
+        // --- DOM Elements ---
+        const bgUpload = document.getElementById('bg-upload');
+        const lottieUploadLabel = document.getElementById('lottie-upload-label');
+        const lottieUpload = document.getElementById('lottie-upload');
+        const compositionArea = document.getElementById('composition-area');
+        const bgCanvas = document.getElementById('bg-canvas');
+        const lottieWrapper = document.getElementById('lottie-wrapper');
+        const lottieCanvas = document.getElementById('lottie-canvas');
+        const moveToolBtn = document.getElementById('move-tool');
+        const applyBtn = document.getElementById('apply-btn');
+
+        // --- NEW: Custom Cursor Elements ---
+        const cursorToolBtn = document.getElementById('cursor-tool');
+        const cursorUpload = document.getElementById('cursor-upload');
+
+        const resizeHandle = document.querySelector('.resize-handle');
+        const resetBtn = document.getElementById('reset-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const toolbar = document.getElementById('toolbar');
+
+
+        const fallbackLoader = document.getElementById('fallback-loader');
+        const jsonInputArea = document.getElementById('json-input-area');
+        const loadJsonBtn = document.getElementById('load-json-btn');
+
+        const loaderOverlay = document.getElementById('loader-overlay');
+        const viewport = document.getElementById('viewport');
+        // --- State Variables ---
+        let dotLottie = null;
+        let lottieDataUrl = null;
+        let lottieNaturalWidth = 300;
+        let lottieNaturalHeight = 300;
+
+        let customCursorDataUrl = null;
+        let isCustomCursorActive = false;
+
+
+
+        /**
+         * Toggles the custom cursor on/off, or opens file dialog if no cursor is set.
+         */
+       function handleCursorToolClick(event) {
+    if (cursorToolBtn.disabled) return;
+
+    // This is the key part: checks if the Shift key was held during the click.
+    if (event.shiftKey) {
+        console.log("Shift+Click detected. Opening file upload for new cursor...");
+        cursorUpload.value = null; // Clear input to allow re-uploading the same file
+        cursorUpload.click();
+        return; // Stop further execution
+    }
+
+    if (!customCursorDataUrl) {
+        // Fallback: If no cursor is loaded at all, a simple click will also open the dialog.
+        cursorUpload.click();
+    } else {
+        // Default action: If a cursor exists, toggle its active state.
+        isCustomCursorActive = !isCustomCursorActive;
+        if (isCustomCursorActive) {
+            setCustomCursor(customCursorDataUrl);
+        } else {
+            resetCursor();
+        }
+    }
+}
+
+          function initializeDefaultCursor() {
+            // Only run this once. If a user has already uploaded a cursor, don't override it.
+            if (customCursorDataUrl === null) {
+                console.log("Applying default custom cursor.");
+                customCursorDataUrl = DEFAULT_CURSOR_DATA_URL;
+                isCustomCursorActive = true;
+                setCustomCursor(customCursorDataUrl);
+            }
+        }
+
+
+        /**
+         * Handles the file upload for the custom cursor.
+         */
+        function handleCursorUpload(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                return; // Exit if no file was selected
+            }
+
+            // --- START: NEW VALIDATION LOGIC ---
+
+            // 1. Define our validation rules
+            const MAX_FILE_SIZE_MB = 0.4;
+            const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+            const ALLOWED_MIME_TYPE = 'image/svg+xml';
+
+            // 2. Check the file's MIME type
+            if (file.type !== ALLOWED_MIME_TYPE) {
+                alert(`Invalid file type. Please select an SVG file.`);
+                // Reset the input so the user can try again with a different file
+                cursorUpload.value = null; 
+                return; // Stop the execution
+            }
+
+            // 3. Check the file's size
+            if (file.size > MAX_FILE_SIZE_BYTES) {
+                alert(`File is too large. Please upload an SVG smaller than ${MAX_FILE_SIZE_MB}MB.`);
+                // Reset the input
+                cursorUpload.value = null; 
+                return; // Stop the execution
+            }
+
+            // --- END: NEW VALIDATION LOGIC ---
+
+
+            // If all checks pass, proceed with loading the file
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                customCursorDataUrl = e.target.result;
+                isCustomCursorActive = true;
+                setCustomCursor(customCursorDataUrl);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        /**
+         * Applies the custom cursor to the entire document body.
+         */
+        function setCustomCursor(dataUrl) {
+            // Apply to the whole body and the viewport
+            const cursorStyle = `url(${dataUrl}), auto`;
+            console.log("Setting custom cursor:", cursorStyle);
+            // --- FIX: Restore this line ---
+            document.body.style.cursor = cursorStyle; 
+            
+            viewport.style.cursor = cursorStyle;
+            cursorToolBtn.classList.add('active');
+            console.log("Custom cursor applied. and class 'active' added to button.");
+        }
+
+        /**
+         * Resets the document body's cursor to default.
+         */
+        function resetCursor() {
+            document.body.style.cursor = 'default';
+            viewport.style.cursor = 'default'; // <<< ADD THIS LINE
+            cursorToolBtn.classList.remove('active');
+            isCustomCursorActive = false;
+        }
+
+
+
+        // --- NEW: Download Function ---
+        function downloadCurrentLottie() {
+            if (!lottieDataUrl) {
+                console.error("Download failed: No .lottie dataUrl is stored.");
+                alert("Error: No .lottie file data found to download.");
+                return;
+            }
+
+            console.log("Triggering .lottie download...");
+            
+            // Create a temporary link element
+            const link = document.createElement('a');
+            link.href = lottieDataUrl;
+            link.download = 'animation.lottie'; // The default filename
+            
+            // Append to the document, click, and then remove
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        // --- END NEW ---
+
+
+
+
+        // --- NEW: State for storing source JSONs and layout data ---
+        let sourceAnimationJson = null;
+        let sourceStateMachineJson = null;
+        let bgImageDataUrl = null; 
+        // --- END NEW ---
+
+        let isMoveModeActive = false;
+        let isDragging = false;
+        let isResizing = false;
+
+        let startX, startY, startLeft, startTop, startWidth;
+        
+        let scaleFactor = 1; 
+
+        // --- NEW: Fallback Logic ---
+        let messageReceived = false;
+        const messageTimeout = 2000; // 2 seconds
+
+        setTimeout(() => {
+            if (loaderOverlay) loaderOverlay.style.display = 'none';
+            if (!messageReceived) {
+                console.log("No message received, showing fallback UI.");
+                lottieUploadLabel.style.display = 'flex'; // Show manual Lottie upload
+                fallbackLoader.style.display = 'block'; // Show new JSON loader
+            }
+        }, messageTimeout);
+
+        // ======================================================
+        // 1. BACKGROUND IMAGE LOADING
+        // ======================================================
+bgUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                bgImageDataUrl = e.target.result; // Store for export
+                loadBackgroundFromDataUrl(bgImageDataUrl);
+            };
+            reader.readAsDataURL(file);
+        });
+        
+        /**
+         * Loads a background image from a data URL onto the canvas
+         * @param {string} dataUrl - The base64 data URL of the image
+         * @param {function} [onLoadCallback] - Optional callback to run after image is loaded
+         */
+        function loadBackgroundFromDataUrl(dataUrl, onLoadCallback) {
+            const img = new Image();
+            img.onload = () => {
+                bgCanvas.width = img.width;
+                bgCanvas.height = img.height;
+                compositionArea.style.aspectRatio = img.width / img.height;
+                
+                const ctx = bgCanvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, img.width, img.height);
+                
+                compositionArea.style.width = 'auto'; /* <-- ADDED: Let aspect ratio control width */
+                document.body.classList.add('editor-active');
+
+                    //initializeDefaultCursor();
+
+
+                
+                if (dotLottie) {
+                    moveToolBtn.disabled = false;
+                    cursorToolBtn.disabled = false;
+                    applyBtn.disabled = false;
+                    resetBtn.disabled = false;
+                }
+
+                // Run the callback if one was provided
+                if (onLoadCallback) {
+                    onLoadCallback();
+                }
+            };
+            img.src = dataUrl;
+        }
+        // ======================================================
+        // 2. LOTTIE FILE LOADING
+        // ======================================================
+
+        // --- Method 1: Listen for data from parent window ---
+      // --- Method 1: Listen for data from parent window ---
+        window.addEventListener('message', async (event) => {
+            
+            // --- MODIFIED: Check for a VALID message type FIRST ---
+            const isValidAppMessage = event.data && (
+                event.data.type === 'lottieData' ||
+                event.data.type === 'loadLayout' ||
+                event.data.type === 'requestLayoutJson'
+            );
+
+            if (!isValidAppMessage) {
+                // This is an unrelated message (e.g., from a browser extension).
+                // We IGNORE it and DO NOT set messageReceived = true.
+                console.log("Ignoring unrelated postMessage:", event.data);
+                return;
+            }
+
+            if (loaderOverlay) loaderOverlay.style.display = 'none';
+
+            // --- IF WE GOT THIS FAR, IT'S A REAL MESSAGE ---  
+            // NOW we can set the flag and hide fallback UIs
+            messageReceived = true;
+            lottieUploadLabel.style.display = 'none';
+            fallbackLoader.style.display = 'none'; // Hide the JSON loader too
+
+
+            // --- OPTION 1: Parent sends lottie data (for a new layout) ---
+            if (event.data.type === 'lottieData') {
+                
+                // 1. Load and play the .lottie file
+                if (event.data.dataUrl) {
+                    console.log("Received .lottie dataUrl from parent.");
+                    lottieDataUrl = event.data.dataUrl;
+                    // Pass 'null' to use the default positioning logic
+                    playLottieFromDataUrl(lottieDataUrl, null); 
+                }
+                
+                // 2. Store the source JSONs
+                if (event.data.animationJson) {
+                    console.log("Received source animation JSON.");
+                    sourceAnimationJson = event.data.animationJson;
+                }
+                if (event.data.stateMachineJson) {
+                    console.log("Received source state machine JSON.");
+                    sourceStateMachineJson = event.data.stateMachineJson;
+                }
+            }
+            
+            // --- OPTION 2: Parent sends a full layout to load ---
+            else if (event.data.type === 'loadLayout') {
+               
+
+                // --- START DEBUGGING ---
+                console.log("Full payload received:", event.data.payload);
+                if (event.data.payload && event.data.payload.layout) {
+                    console.log("Checking for cursor at 'payload.layout.customCursor':", event.data.payload.layout.customCursor);
+                } else {
+                    console.log("ERROR: 'payload.layout' object is missing or undefined.");
+                }
+                // --- END DEBUGGING ---
+
+
+                toolbar.style.display = 'none';
+                downloadBtn.style.display = 'none';
+
+                // Payload no longer contains lottieDataUrl
+                const { animation, stateMachine, layout } = event.data.payload; 
+
+                // 1. Store source JSONs
+                sourceAnimationJson = animation;
+                sourceStateMachineJson = stateMachine;
+                
+                // 2. NEW: Build the lottieDataUrl on the fly
+                lottieDataUrl = await buildLottieDataUrl(animation, stateMachine);
+                
+                // 3. Load background image from layout
+                if (layout && layout.backgroundImage) {
+                    bgImageDataUrl = layout.backgroundImage; // Store it for re-export
+                    
+                    // Load BG, and *then* load Lottie in the callback
+                    loadBackgroundFromDataUrl(bgImageDataUrl, () => {
+                        if (lottieDataUrl) {
+                            playLottieFromDataUrl(lottieDataUrl, layout.lottie, layout.customCursor);
+                        }
+                    });
+                } else {
+                    // No background image, just load lottie with layout
+                    if (lottieDataUrl) {
+                         playLottieFromDataUrl(lottieDataUrl, layout.lottie);
+                    }
+                }
+              
+            }   
+            
+
+            // --- OPTION 3: Parent requests the current layout JSON ---
+            else if (event.data.type === 'requestLayoutJson') {
+                console.log("Parent requested layout JSON. Building and responding...");
+                
+                // 1. Check if we have the source JSONs
+                if (!sourceAnimationJson || !sourceStateMachineJson) {
+                    console.error("Cannot respond: Source animation or state machine data is missing.");
+                    // Optionally, send an error message back
+                    window.parent.postMessage({ type: 'layoutJsonError', error: 'Source data not found in iframe.' }, '*');
+                    return;
+                }
+
+                // 2. Create the layout object (this is the same logic as your apply-btn)
+                const layout = {
+                    backgroundImage: bgImageDataUrl || "",
+                    lottie: {
+                        width: parseFloat(lottieWrapper.style.width) || lottieNaturalWidth,
+                        height: lottieWrapper.offsetHeight,
+                        x: parseFloat(lottieWrapper.style.left) || 0,
+                        y: parseFloat(lottieWrapper.style.top) || 0
+                    },
+                     customCursor: customCursorDataUrl || null
+                };
+                
+                // 3. Build the final combined JSON
+                const combinedJson = {
+                    animation: sourceAnimationJson,
+                    stateMachine: sourceStateMachineJson,
+                    layout: layout
+                };
+
+                // 4. Send the complete payload back to the parent
+                window.parent.postMessage({
+                    type: 'layoutJsonResponse',
+                    payload: combinedJson
+                }, '*');
+            }
+        });
+    
+       loadJsonBtn.addEventListener('click', async () => { 
+            const jsonString = jsonInputArea.value;
+            if (!jsonString) {
+                alert("Please paste the JSON data first.");
+                return;
+            }
+
+            try {
+                const combinedJson = JSON.parse(jsonString);
+
+                if (!combinedJson.animation || !combinedJson.stateMachine || !combinedJson.layout) {
+                    alert("Invalid JSON structure. Missing one or more keys: animation, stateMachine, layout.");
+                    return;
+                }
+
+                // --- Process the JSON (identical to 'loadLayout' message) ---
+                const { animation, stateMachine, layout } = combinedJson;
+
+                // 1. Store source JSONs
+                sourceAnimationJson = animation;
+                sourceStateMachineJson = stateMachine;
+
+                // 2. Build the lottieDataUrl on the fly
+                lottieDataUrl = await buildLottieDataUrl(animation, stateMachine); 
+                
+                // 3. Load background image from layout
+                if (layout && layout.backgroundImage) {
+                    bgImageDataUrl = layout.backgroundImage; 
+                    loadBackgroundFromDataUrl(bgImageDataUrl, () => {
+                        if (lottieDataUrl) {
+                            // --- MODIFIED: Pass customCursor data ---
+                            playLottieFromDataUrl(lottieDataUrl, layout.lottie, layout.customCursor);
+                        }
+                    });
+                } else {
+                    if (lottieDataUrl) {
+                         // --- MODIFIED: Pass customCursor data ---
+                         playLottieFromDataUrl(lottieDataUrl, layout.lottie, layout.customCursor);
+                    }
+                }
+
+                // --- REMOVED: The old cursor logic was here. It's now inside playLottieFromDataUrl ---
+
+                // Hide fallback UI after successful load
+                fallbackLoader.style.display = 'none';
+
+            } catch (err) {
+                console.error("Failed to parse JSON:", err);
+                alert("Failed to parse JSON. Please check the console for errors.");
+            }
+        });
+
+
+        // --- Method 2: Load from local file upload (fallback) ---
+        lottieUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const dataUrl = e.target.result;
+                playLottieFromDataUrl(dataUrl);
+            };
+            reader.readAsDataURL(file);
+        });
+
+
+    // --- Core Lottie Player Function ---
+  function playLottieFromDataUrl(dataUrl, lottieLayout = null, customCursor = null) {
+            
+            // --- START: NEW DEBUGGING ---
+            console.log("playLottieFromDataUrl CALLED. customCursor argument is:", customCursor);
+            // --- END: NEW DEBUGGING ---
+
+            // 1. Reset all cursor state immediately
+            if (isCustomCursorActive) {
+                resetCursor();
+            }
+            customCursorDataUrl = null; 
+               
+            // 2. Destroy old instance if it exists
+            if (dotLottie) {
+                dotLottie.destroy();
+            }
+
+            // 3. Create new Lottie instance
+            dotLottie = new DotLottie({
+                canvas: lottieCanvas,
+                src: dataUrl,
+                autoplay: true,
+                loop: true,
+                stateMachineConfig: {
+                    openUrlPolicy: {
+                    requireUserInteraction: true,
+                    whitelist: ['*']
+                    }
+                }
+            });
+            
+            // 4. Add error handling
+            dotLottie.addEventListener('error', (e) => {
+                console.error("Failed to load .lottie file:", e);
+                alert("Failed to load the .lottie file. Please check the console for errors.");
+                downloadBtn.disabled = true;
+                resetBtn.disabled = true;
+                moveToolBtn.disabled = true;
+                applyBtn.disabled = true;
+            });
+         
+            // 5. Add load listener
+            dotLottie.addEventListener('load', () => {
+                console.log('Player loaded animation.');
+                
+                // --- START REFACTORED CURSOR LOGIC ---
+                // We check the arguments passed to the function *immediately*.
+                
+                if (lottieLayout === null) {
+                    // SCENARIO 1: NEW ANIMATION (from 'lottieData' message)
+                    // Apply the default SVG cursor.
+                    console.log("Applying default SVG cursor.");
+                    initializeDefaultCursor();
+                } else {
+                    // SCENARIO 2: SAVED LAYOUT (from 'loadLayout' or 'loadJsonBtn')
+                    if (customCursor) {
+                        // The layout has a specific cursor saved. Apply it.
+                        console.log("Applying specific custom cursor from layout data.");
+                        customCursorDataUrl = customCursor;
+                        isCustomCursorActive = true;
+                        setCustomCursor(customCursorDataUrl);
+                    } else {
+                        // The layout has no cursor saved. Use the browser's default.
+                        console.log("No custom cursor in layout. Using browser default.");
+                        // (We already called resetCursor() at the start, so nothing to do)
+                    }
+                }
+                // --- END REFACTORED CURSOR LOGIC ---
+
+                downloadBtn.disabled = false;
+
+                if (dotLottie.dimensions) {
+                    lottieNaturalWidth = dotLottie.dimensions.width;
+                    lottieNaturalHeight = dotLottie.dimensions.height;
+                } else {
+                    lottieNaturalWidth = lottieCanvas.width;
+                    lottieNaturalHeight = lottieCanvas.height;
+                }
+                
+                const aspectRatio = lottieNaturalWidth / lottieNaturalHeight;
+                lottieWrapper.style.aspectRatio = aspectRatio;
+                lottieWrapper.style.display = 'block'; 
+
+                // --- MODIFIED: Size and position Lottie ---
+                    if (lottieLayout) {
+                        console.log("Applying specific layout:", lottieLayout);
+                        lottieWrapper.style.width = `${lottieLayout.width}px`;
+                        lottieWrapper.style.left = `${lottieLayout.x}px`;
+                        lottieWrapper.style.top = `${lottieLayout.y}px`;
+                    } 
+                    else {
+                        const parentWidth = compositionArea.offsetWidth;
+                        const parentHeight = compositionArea.offsetHeight;
+
+                        if (!document.body.classList.contains('editor-active')) {
+                            const parentAspectRatio = parentWidth / parentHeight;
+                            const lottieAspectRatio = lottieNaturalWidth / lottieNaturalHeight;
+                            let newWidth, newHeight;
+                            if (lottieAspectRatio > parentAspectRatio) {
+                                newWidth = parentWidth;
+                                newHeight = newWidth / lottieAspectRatio;
+                                lottieWrapper.style.width = `${newWidth}px`;
+                            } else {
+                                newHeight = parentHeight;
+                                newWidth = newHeight * lottieAspectRatio;
+                                lottieWrapper.style.width = `${newWidth}px`;
+                            }
+                            lottieWrapper.style.left = `${(parentWidth - newWidth) / 2}px`;
+                            lottieWrapper.style.top = `${(parentHeight - newHeight) / 2}px`;
+                        } else {
+                            lottieWrapper.style.width = '300px';
+                            lottieWrapper.style.left = '50px';
+                            lottieWrapper.style.top = '50px';
+                        }
+                    }
+                    requestAnimationFrame(() => {
+                        lottieWrapper.style.opacity = '1';
+                        compositionArea.style.opacity = '1';
+                    });
+                    
+                    if (dotLottie) {
+                        dotLottie.resize();
+                    }
+                // --- END MODIFICATION ---
+
+
+                // --- FIX: Wrap state machine logic in try...catch ---
+                try {
+                    console.log("Attempting to load state machine 'stateMachine'...");
+                    dotLottie.stateMachineLoad('stateMachine');
+                    dotLottie.stateMachineStart();
+                    resetBtn.disabled = false; // Only enable reset if state machine loads
+                } catch (e) {
+                    console.warn("Could not load state machine 'stateMachine'. Reset button will be disabled.", e);
+                    resetBtn.disabled = true; // Ensure it's disabled if it fails
+                }
+                // --- END FIX ---
+
+                if (document.body.classList.contains('editor-active')) {
+                    moveToolBtn.disabled = false;
+                    cursorToolBtn.disabled = false;
+                    applyBtn.disabled = false;
+                }
+            });
+        }
+        // ======================================================
+        // 3. TOOLBAR CONTROLS
+        // ======================================================
+
+        moveToolBtn.addEventListener('click', () => {
+            isMoveModeActive = true;
+            lottieWrapper.classList.add('move-mode');
+            moveToolBtn.classList.add('active');
+            applyBtn.disabled = false;
+            applyBtn.style.display = 'flex'; // <-- 2. SHOW APPLY BUTTON
+        });
+
+        applyBtn.addEventListener('click', async () => {
+            isMoveModeActive = false;
+            lottieWrapper.classList.remove('move-mode');
+            moveToolBtn.classList.remove('active');
+            applyBtn.style.display = 'none';
+            lottieWrapper.style.cursor = 'default';
+            
+            // --- NEW: Build and Copy Logic ---
+            
+            // 1. Check if we have the source JSONs
+            if (!sourceAnimationJson || !sourceStateMachineJson) {
+                console.error("Cannot copy JSON: Source animation or state machine data is missing.");
+                alert("Error: Source JSON data was not received. Cannot copy.");
+                return;
+            }
+
+            // 2. Create the layout object
+            const layout = {
+                backgroundImage: bgImageDataUrl || "", // Use stored BG data
+                lottie: {
+                    width: parseFloat(lottieWrapper.style.width) || lottieNaturalWidth,
+                    height: lottieWrapper.offsetHeight, // Use offsetHeight for the calculated height
+                    x: parseFloat(lottieWrapper.style.left) || 0,
+                    y: parseFloat(lottieWrapper.style.top) || 0
+                },
+                customCursor: customCursorDataUrl || null
+            };
+            
+            // 3. Build the final combined JSON
+            const combinedJson = {
+                animation: sourceAnimationJson,
+                stateMachine: sourceStateMachineJson,
+                layout: layout // Add the new layout object
+            };
+            
+            // 4. Stringify and copy to clipboard
+            const jsonString = JSON.stringify(combinedJson, null, 2); // Pretty-print
+            const success = await copyToClipboard(jsonString);
+
+            if (success) {
+                alert("Layout and State Machine JSON copied to clipboard!");
+            } else {
+                alert("Failed to copy JSON to clipboard. See console for errors.");
+            }
+        });
+
+        cursorToolBtn.addEventListener('click', handleCursorToolClick);
+        cursorUpload.addEventListener('change', handleCursorUpload);
+        
+        resetBtn.addEventListener('click', () => {
+            if (dotLottie) {
+                console.log("Resetting state machine...");
+                dotLottie.stateMachineStop();
+                // We re-load the machine to ensure it starts from the beginning
+                dotLottie.stateMachineLoad('stateMachine');
+                dotLottie.stateMachineStart();
+            }
+        });
+
+        downloadBtn.addEventListener('click', downloadCurrentLottie);
+        // ======================================================
+        // 4. DRAG AND RESIZE LOGIC
+        // ======================================================
+
+        function updateScaleFactor() {
+            scaleFactor = compositionArea.getBoundingClientRect().width / compositionArea.offsetWidth;
+        }
+
+        lottieWrapper.addEventListener('mousedown', (e) => {
+            if (!isMoveModeActive || e.target === resizeHandle) return;
+            
+            e.preventDefault();
+            isDragging = true;
+            updateScaleFactor(); 
+
+            startX = e.clientX;
+            startY = e.clientY;
+            
+            startLeft = lottieWrapper.offsetLeft;
+            startTop = lottieWrapper.offsetTop;
+            
+            lottieWrapper.style.cursor = 'grabbing';
+        });
+
+        resizeHandle.addEventListener('mousedown', (e) => {
+            if (!isMoveModeActive) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            isResizing = true;
+            updateScaleFactor();
+
+            startX = e.clientX;
+            startWidth = lottieWrapper.offsetWidth;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isMoveModeActive) return;
+
+            if (isDragging) {
+                e.preventDefault();
+                let dx = e.clientX - startX;
+                let dy = e.clientY - startY;
+                let newLeft = startLeft + (dx / scaleFactor);
+                let newTop = startTop + (dy / scaleFactor);
+                lottieWrapper.style.left = `${newLeft}px`;
+                lottieWrapper.style.top = `${newTop}px`;
+            } 
+            else if (isResizing) {
+                e.preventDefault();
+                let dx = e.clientX - startX;
+                let newWidth = startWidth + (dx / scaleFactor);
+                if (newWidth < 50) newWidth = 50; 
+                lottieWrapper.style.width = `${newWidth}px`;
+                
+                // --- NEW: Tell Lottie to resize its canvas to match the new wrapper size ---
+                if (dotLottie) {
+                    dotLottie.resize();
+                }
+                // --- END NEW ---
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                lottieWrapper.style.cursor = 'move';
+            }
+            if (isResizing) {
+                isResizing = false;
+            }
+        });
+
+        window.addEventListener('resize', updateScaleFactor);
+
+        // --- NEW: Helper function to copy text to the clipboard ---
+        async function copyToClipboard(text) {
+            if (!navigator.clipboard) {
+                console.warn('Clipboard API not available. Falling back to execCommand.');
+                // Fallback for older browsers
+                try {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = text;
+                    textArea.style.position = "fixed";  // Avoid scrolling to bottom
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    return true;
+                } catch (err) {
+                    console.error('Fallback copy failed: ', err);
+                    return false;
+                }
+            }
+            // Modern async API
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch (err) {
+                console.error('Async clipboard copy failed: ', err);
+                return false;
+            }
+        }
+
+    </script>
+</body>
+</html>
+
+

@@ -1,0 +1,1597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lottie Interactive Layer Creator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
+    <!-- Lottie-Web Player Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Hanken Grotesk', sans-serif; 
+            /* --- NEW: Hide scrollbar --- */
+            overflow: hidden;
+            background-color: #f9fafb; /* Light gray background for the whole page */
+        }
+
+        /* Custom styles for the resizable layer and its handles */
+        #layer-container {
+            position: relative;
+            /* Prevents overflow from editor elements, but allows tooltips to show */
+            overflow: visible;
+        }
+
+        #lottie-player {
+            width: 100%;
+            height: 100%;
+            /* --- NEW: Checkerboard background texture --- */
+            background-color: #f0f0f0; /* Fallback color */
+            background-image:
+                linear-gradient(45deg, #e0e0e0 25%, transparent 25%),
+                linear-gradient(-45deg, #e0e0e0 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #e0e0e0 75%),
+                linear-gradient(-45deg, transparent 75%, #e0e0e0 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+
+        #resizable-layer {
+            position: absolute;
+            border: 2px solid #3b82f6; /* Solid blue border */
+            background-color: rgba(59, 130, 246, 0.15); /* Slightly more transparent background */
+            cursor: move;
+            box-sizing: border-box; /* Ensures border is inside the element's dimensions */
+            z-index: 10; /* Ensure the active layer is on top */
+            border-radius: 8px; /* Rounded corners */
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), inset 0 0 0 1px rgba(255,255,255,0.2); /* Floating shadow */
+        }
+        
+        .resize-handle {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: #3b82f6;
+            border: 1px solid #ffffff;
+            border-radius: 9999px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* NEW: Style for the greyed-out guide layers */
+        .guide-layer {
+            position: absolute;
+            
+            border: 2px solid #9ca3af; /* Solid green border */
+            box-sizing: border-box;
+            pointer-events: auto; /* Allow hover events */
+            z-index: 5; /* Place them above the Lottie player but below the active layer */
+            /* NEW: Diagonal line texture */
+            background: repeating-linear-gradient(45deg, rgba(156, 163, 175, 0.3), rgba(156, 163, 175, 0.3) 10px, rgba(156, 163, 175, 0.15) 10px, rgba(156, 163, 175, 0.15) 20px);
+            transition: border-color 0.2s ease-in-out, background 0.2s ease-in-out;
+        }
+
+        .guide-layer:hover {
+            border-color: #fbbf24; /* amber-400 */
+            background: repeating-linear-gradient(45deg, rgba(251, 191, 36, 0.3), rgba(251, 191, 36, 0.3) 10px, rgba(251, 191, 36, 0.15) 10px, rgba(251, 191, 36, 0.15) 20px);
+        }
+
+        /* NEW: Tooltip for guide layers */
+        .guide-layer .tooltip {
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            bottom: 105%; /* Position above the guide layer */
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            transition: opacity 0.2s ease-in-out;
+            z-index: 20; /* Ensure tooltip is above other layers */
+        }
+        .guide-layer:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+
+
+        /* --- NEW: Styles for the improved tooltip --- */
+        .guide-layer .tooltip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+        }
+        /* --- NEW: Add a gap between the state name and the pill --- */
+        .tooltip > span:first-of-type { margin-right: 4px; }
+        .tooltip-pill {
+            background-color: #ffffff; /* White background */
+            color: #090e14; /* Dark gray/black text */
+            border: 1px solid #e5e7eb; /* Light gray border */
+            padding: 1px 6px; /* Adjusted padding */
+            border-radius: 9999px;
+            font-size: 10px; /* Smaller text */
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            /* --- NEW: Use flex to align arrow and text --- */
+            display: inline-flex;
+            align-items: center;
+            gap: 5px; /* Space between arrow and text */
+            padding-left: 8px; /* More padding on the left for the arrow */
+            padding-right: 8px;
+        }
+        /* --- END NEW --- */
+
+        .top-left { top: -6px; left: -6px; cursor: nwse-resize; }
+        .top-right { top: -6px; right: -6px; cursor: nesw-resize; }
+        .bottom-left { bottom: -6px; left: -6px; cursor: nesw-resize; }
+        .bottom-right { bottom: -6px; right: -6px; cursor: nwse-resize; }
+        .top-center { top: -6px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+        .bottom-center { bottom: -6px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+        .left-center { left: -6px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+        .right-center { right: -6px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+    </style>
+    <!-- --- NEW: Styles for new tooltips --- -->
+    <style>
+        /* --- NEW: Style for the frame range inside the guide layer tooltip --- */
+        .tooltip-frames {
+            background-color: #f3f4f6; /* gray-100 */
+            color: #4b5563; /* gray-600 */
+            border: 1px solid #e5e7eb; /* gray-200 */
+            padding: 1px 8px;
+            border-radius: 9999px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-top: 6px; /* Space it from the line above */
+            display: inline-block; /* Allow it to sit on its own line */
+        }
+
+        /* --- MODIFIED: Adjust main tooltip for multi-line content --- */
+        .guide-layer .tooltip {
+            display: block; /* Allow block elements inside */
+            text-align: center; /* Center the content */
+        }
+
+        /* --- NEW: Style for the tooltip on the seek bar highlight --- */
+        #guide-highlight-tooltip {
+            position: absolute;
+            bottom: 120%; /* Position above the highlight bar */
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            pointer-events: none; /* Ensure it doesn't interfere with mouse events */
+        }
+
+        /* --- NEW: Add the chat bubble tail --- */
+        #guide-highlight-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%; /* Position at the bottom of the tooltip */
+            left: 50%;
+            margin-left: -5px; /* Center the triangle */
+            border-width: 5px;
+            border-style: solid;
+            border-color: #333 transparent transparent transparent; /* Creates a downward-pointing triangle */
+        }
+    </style>
+    <!-- --- END NEW --- -->
+    <!-- NEW: Styles for Play/Pause Button -->
+    <style>
+        /* --- REMOVED old play-pause-toggle styles --- */
+
+        #download-preview-button {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            z-index: 20;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 9999px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        #download-preview-button:hover {
+            transform: scale(1.1);
+            background-color: white;
+        }
+
+        /* --- NEW: Styles for seek bar progress --- */
+        #seek-bar {
+            
+        }
+        #seek-bar::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 8px;
+            height: 8px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 0 2px rgba(0,0,0,0.3);
+            margin-top: 0px; /* Adjust thumb position to be centered */
+            position: relative; 
+            z-index: 14; /* MODIFIED: Increased z-index to ensure it's above the highlight */
+        }
+        #seek-bar::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 0 2px rgba(0,0,0,0.3);
+            position: relative;
+            z-index: 4; /* MODIFIED: Increased z-index to ensure it's above the highlight */
+        }
+    </style>
+    <style>
+        #download-button {
+            display: none !important;
+        }
+
+        /* --- NEW: Layer Panel Styles --- */
+        #layer-panel {
+            width: 280px; /* Fixed width for the panel */
+            flex-shrink: 0; /* Prevent the panel from shrinking */
+            background-color: #ffffff;
+            border-left: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            box-shadow: -2px 0 8px rgba(0,0,0,0.04);
+        }
+        #layer-panel-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #e5e7eb;
+            font-weight: 600;
+            color: #374151;
+            flex-shrink: 0;
+        }
+        #layer-list {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 0.5rem;
+        }
+        .layer-item {
+            display: flex;
+            justify-content: space-between; /* NEW: Pushes content to edges */
+            align-items: center;
+            padding: 0.6rem 0.75rem;
+            border-radius: 0.375rem;
+            user-select: none;
+            transition: background-color 0.2s ease;
+            border: 1px solid transparent;
+            margin: 8px 0px;
+        }
+        .layer-item:hover {
+            background-color: #f3f4f6; /* Gray-100 */
+        }
+        .layer-item.dragging {
+            opacity: 0.5;
+            background-color: #dbeafe; /* Blue-100 */
+            border-color: #93c5fd; /* Blue-300 */
+        }
+        .layer-item.active-editing-layer {
+            background-color: #eff6ff; /* Blue-50 */
+            border-color: #bfdbfe; /* Blue-200 */
+            font-weight: 600;
+            color: #1d4ed8; /* Blue-700 */
+        }
+        .layer-item .layer-icon {
+            margin-right: 0.8rem; /* MODIFIED: Reduced margin */
+            color: #9ca3af; /* Gray-400 */
+        }
+        /* --- NEW: Grab Handle for Layer Items --- */
+        .layer-grab-handle {
+            color: #d1d5db; /* Gray-300 */ /* MODIFIED: Removed margin-right */
+            opacity: 0; /* Hidden by default */
+            transition: opacity 0.2s ease-in-out;
+            cursor: grab;
+        }
+        .layer-item:hover .layer-grab-handle {
+            opacity: 1; /* Show on hover */
+        }
+        /* --- NEW: Pill style for formatted layer names --- */
+        .layer-name-pill {
+            background-color: #e5e7eb; /* Gray-200 */
+            color: #4b5563; /* Gray-600 */
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            margin: 0 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+             .layer-name-pill .fa-chevron-right {
+            font-size: 9px;
+            opacity: 0.6;
+            margin-left: 2px;
+        }
+
+        .active-editing-layer .layer-name-pill {
+            background-color: #dbeafe; /* Blue-200 */
+            color: #1e40af; /* Blue-800 */
+        }
+        /* --- END NEW --- */
+        /* --- END NEW --- */
+    </style>
+</head>
+<body class="bg-transparent font-sans p-4 sm:p-6 md:p-8">
+    <!-- --- MODIFIED: Increased max-width for a wider editor --- -->
+    <div class="max-w-6xl mx-auto bg-transparent space-y-6">
+        
+        <header class="text-center hidden">
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Lottie Interactive Layer Creator</h1>
+            <p class="text-gray-500 mt-1">Visually define interactive areas for your Lottie animations.</p>
+        </header>
+
+        <!-- Step 1: File Upload -->
+        <div class="p-4 border rounded-lg bg-gray-50">
+            <label for="lottie-upload" class="block text-sm font-medium text-gray-700 mb-2">1. Upload Lottie JSON File</label>
+            <input type="file" id="lottie-upload" accept=".json" class="block w-full text-sm text-gray-500
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-full file:border-0
+                file:text-sm file:font-semibold
+                file:bg-blue-50 file:text-blue-700
+                hover:file:bg-blue-100 cursor-pointer"/>
+        </div>
+
+        <!-- Animation Preview and Editor -->
+        <!-- --- MODIFIED: Use flexbox for side-by-side layout --- -->
+        <div id="editor-section" class="hidden flex gap-6" >
+            <!-- --- NEW: Wrapper for header and player to create a single window entity --- -->
+             <div style="display: flex; gap: 20px; margin: auto;">
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden" style="min-width: 650px; max-width:700px">
+                <!-- Dynamic Header -->
+                <div id="dynamic-header" class="hidden text-left px-4 py-3 border-b border-gray-200">
+                    <p class="text-sm text-gray-500">Define Interaction Area for</p>
+                    <div id="transition-display" class="flex items-center justify-start gap-2 text-lg font-bold text-gray-800 mt-1">
+                        <!-- Content will be populated by JS -->
+                    </div>
+                </div>
+
+                <!-- --- MODIFIED: Wrapper for player and new controls --- -->
+                <div class="bg-gray-50 flex-grow">
+                    <!-- Container for Lottie player and the interactive layer -->
+                    <div id="layer-container">
+                        <!-- REMOVED: Old Play/Pause Toggle Button -->
+                        <button id="download-preview-button" title="Download current preview JSON">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <div id="lottie-player"></div>
+                        <!-- The resizable and draggable layer -->
+                        <div id="resizable-layer" class="hidden">
+                            <!-- NEW: Overlap warning message -->
+                            <div id="overlap-warning" class="hidden absolute inset-0 flex items-center justify-center text-center p-2 pointer-events-none">
+                            <span class="bg-amber-500 text-white font-bold text-sm px-3 py-1 rounded-xl shadow-lg">Overlap detected. The Interaction with with higher priority will be preferred for the overlapped region.</span>
+                            </div>
+                            <div class="resize-handle top-left" data-handle="top-left"></div>
+                            <div class="resize-handle top-right" data-handle="top-right"></div>
+                            <div class="resize-handle bottom-left" data-handle="bottom-left"></div>
+                            <div class="resize-handle bottom-right" data-handle="bottom-right"></div>
+                            <div class="resize-handle top-center" data-handle="top-center"></div>
+                            <div class="resize-handle bottom-center" data-handle="bottom-center"></div>
+                            <div class="resize-handle left-center" data-handle="left-center"></div>
+                            <div class="resize-handle right-center" data-handle="right-center"></div>
+                        </div>
+                    </div>
+                    <!-- NEW: Player Controls -->
+                    <div id="player-controls" class="p-3 border-t border-gray-200">
+                        <div class="flex items-center gap-4">
+                            <button id="play-pause-btn" class="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full text-gray-600 hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <i class="fas fa-pause text-lg"></i>
+                            </button>
+                            <span id="frame-counter-start" class="text-sm text-gray-600 font-mono w-10 text-right">0</span>
+                            <div class="relative w-full flex-grow flex items-center h-4">
+                                <div class="absolute w-full h-1.5 bg-gray-300 rounded-full top-1/2 -translate-y-1/2" style="z-index: 1;"></div>
+                                <div id="segment-highlight" class="absolute h-4 rounded-full bg-indigo-300 pointer-events-none hidden" style="top: 50%; transform: translateY(-50%); z-index: 2; border: 3px solid #f9fafb; box-sizing: border-box;"></div>
+                                <!-- MODIFIED: Highlight for hovered guide layers on main track, now with a tooltip. Inline styles removed. -->
+                                <div id="guide-highlight" class="absolute h-4 rounded-full bg-amber-400 pointer-events-none hidden" style="top: 50%; transform: translateY(-50%); z-index: 2; border: 3px solid #f9fafb; box-sizing: border-box;">
+                                    <!-- MOVED: Tooltip is now a child of the highlight bar -->
+                                    <div id="guide-highlight-tooltip" class="hidden"></div>
+                                </div>
+                                <input type="range" id="seek-bar" value="0" class="w-full h-full bg-transparent appearance-none cursor-pointer relative" style="z-index: 3;">
+                            </div>
+                            <span id="frame-counter-end" class="text-sm text-gray-600 font-mono w-10 text-left">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- --- END NEW WRAPPER --- -->
+            <!-- --- NEW: Layer Panel --- -->
+            <div id="layer-panel" class="hidden"  style="width: 350px;">
+                <div id="layer-panel-header">Interaction Priority Order</div>
+                <div id="layer-list"></div>
+            </div>
+            <!-- --- END NEW --- -->
+            </div>
+            <!-- NEW: Save button container, placed directly below the preview -->
+            
+        </div>
+        <div class="flex justify-center pt-4" style="position: absolute;">
+                <button id="download-button" class="h-12 px-6 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center gap-2 text-lg font-bold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all transform hover:scale-105">
+                    <i class="fas fa-check"></i> <span>Save Layer</span>
+                </button>
+            </div>
+
+            <!-- Hidden elements that are still used by the script -->
+            <select id="segment-select" class="hidden"></select>
+            <input type="text" id="layer-name" class="hidden"/>
+            <button id="save-button" class="hidden"></button>
+            <button id="close-button" class="hidden"></button>
+            <div id="output-section" class="hidden"></div>
+
+
+        <div id="welcome-message" class="text-center p-8 border-2 border-dashed rounded-lg">
+             <p class="text-gray-500">Upload a Lottie file to begin.</p>
+        </div>
+    </div>
+
+    <script>
+        const uploadInput = document.getElementById('lottie-upload');
+        const editorSection = document.getElementById('editor-section');
+        const welcomeMessage = document.getElementById('welcome-message');
+        const lottiePlayer = document.getElementById('lottie-player');
+        const segmentSelect = document.getElementById('segment-select');
+        const layerNameInput = document.getElementById('layer-name');
+        const saveButton = document.getElementById('save-button');
+        const outputSection = document.getElementById('output-section');
+       
+        const downloadButton = document.getElementById('download-button');
+        const closeButton = document.getElementById('close-button');
+        const layerContainer = document.getElementById('layer-container');
+        const resizableLayer = document.getElementById('resizable-layer');
+        
+        let animation = null;
+        // let isSegmentPlaying = true; // REMOVED: This state variable is no longer used.
+        let isScrubbing = false; // NEW: Flag to track when user is dragging the seek bar
+        let animationData = null;
+        let pristineAnimationData = null; // NEW: To store the untouched Lottie data
+        let finalLayerDataForExport = null;
+        // --- NEW: Global state for layer names ---
+        let currentLayerName = '';
+        let isViewOnly = false; // NEW: Flag for view-only mode
+        let currentOldLayerName = '';
+        // --- NEW: State for layer panel ---
+        let visibleLayersForPanel = [];
+        const layerList = document.getElementById('layer-list');
+        const layerPanel = document.getElementById('layer-panel');
+
+        // --- 1. Initialization Logic ---
+        
+        // Flag to check if data was loaded via postMessage
+        let dataLoadedFromParent = false;
+
+        // Listen for a message from a parent window (for iframe usage)
+        window.addEventListener('message', (event) => {
+            // --- NEW: Handle the new 'view-only' message type ---
+            if (event.data && event.data.type === 'lottieDataForViewer') {
+                console.log('[Viewer] Received view-only data from parent window:', JSON.parse(JSON.stringify(event.data)));
+                isViewOnly = true;
+                dataLoadedFromParent = true;
+                animationData = event.data.animationData;
+                pristineAnimationData = JSON.parse(JSON.stringify(animationData));
+                const markerName = event.data.markerName;
+
+                if (animationData) {
+                    document.querySelector('#lottie-upload').parentElement.classList.add('hidden');
+                    // In view-only mode, we don't need to find a specific layer, just show all guides.
+                    renderVisibleLayersAsGuides(animationData, markerName, null, null);
+                    setupEditor(markerName, null, animationData, null, null);
+                }
+            }
+            if (event.data && event.data.type === 'lottieDataForMarker') {
+                // --- NEW: Log the data received from the parent window ---
+                console.log('[LOG] Received data from parent window:', JSON.parse(JSON.stringify(event.data)));
+
+                dataLoadedFromParent = true;
+                animationData = event.data.animationData;
+                pristineAnimationData = JSON.parse(JSON.stringify(animationData)); // NEW: Store a pristine copy
+                const markerName = event.data.markerName;
+                const layerName = event.data.layerName; // NEW: Get layer name
+                const oldLayerName = event.data.oldLayerName; // --- NEW: Get the old layer name to exclude ---
+                // --- NEW: Store layer names globally for later use ---
+                currentLayerName = layerName;
+                currentOldLayerName = oldLayerName;
+
+                const animationId = event.data.animationId; // Get the unique ID
+
+                // NEW: Populate the dynamic header
+                populateDynamicHeader(layerName);
+
+                if (animationData) {
+                    document.querySelector('#lottie-upload').parentElement.classList.add('hidden'); // Hide the manual file upload section
+                    downloadButton.classList.remove('bg-green-600', 'hover:bg-green-700', 'focus:ring-green-500'); // NEW: Change button text for iframe mode
+                    downloadButton.classList.add('bg-blue-600', 'hover:bg-blue-700', 'focus:ring-blue-500');
+                    downloadButton.textContent = 'Save and Return to Editor';
+                    if (layerName) layerNameInput.value = layerName; // NEW: Pre-fill layer name
+                    // Pass the unique ID to be sent back on save
+                    
+                    // --- MODIFIED: Pass oldLayerName to the setup functions ---
+                   renderVisibleLayersAsGuides(animationData, markerName, layerName, oldLayerName); // This is correct
+                    setupEditor(markerName, animationId, animationData, layerName, oldLayerName); // Pass oldLayerName here as well
+                } else {
+                    console.error('postMessage received, but animationData is missing.');
+                }
+            }
+
+            // NEW: Listen for the save trigger from the parent
+            if (event.data && event.data.type === 'triggerSaveFromParent') {
+                const saveBtn = document.getElementById('download-button');
+                if (saveBtn) {
+                    saveBtn.click();
+                }
+            }
+        });
+
+        // --- NEW: Close button logic for iframe mode ---
+        closeButton.addEventListener('click', () => {
+            // This button is only visible in iframe mode.
+            window.parent.postMessage({
+                type: 'closeClickAreaTool'
+            }, '*');
+        });
+
+        // Fallback for standalone usage: listen for file upload
+        setTimeout(() => {
+            if (!dataLoadedFromParent) {
+                console.log('No message from parent received. Initializing for standalone file upload.');
+                uploadInput.addEventListener('change', (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        animationData = JSON.parse(e.target.result);
+                        pristineAnimationData = JSON.parse(e.target.result); // NEW: Store a pristine copy
+                        setupEditor();
+                    };
+                    reader.readAsText(file);
+                });
+            }
+        }, 500); // Wait 500ms for a message before enabling file upload listener
+
+        // --- NEW: Function to populate the dynamic header ---
+        function populateDynamicHeader(layerName) {
+            const header = document.getElementById('dynamic-header');
+            const transitionDisplay = document.getElementById('transition-display');
+            if (!header || !transitionDisplay) return;
+
+            // Clear previous content
+            transitionDisplay.innerHTML = '';
+
+            const toSeparator = '_to_';
+            const toIndex = layerName.lastIndexOf(toSeparator);
+
+            if (toIndex !== -1) {
+                const toState = layerName.substring(toIndex + toSeparator.length).replace(/_/g, ' ');
+                const beforePart = layerName.substring(0, toIndex);
+                const lastUnderscoreIndex = beforePart.lastIndexOf('_');
+                
+                if (lastUnderscoreIndex !== -1) {
+                    const fromState = beforePart.substring(0, lastUnderscoreIndex).replace(/_/g, ' ');
+                    const interaction = beforePart.substring(lastUnderscoreIndex + 1);
+
+                    // Use the same rich format as the tooltips
+                    transitionDisplay.innerHTML = `
+                        <span>${fromState}</span>
+                        <span class="tooltip-pill" style="font-size: 12px; padding: 4px 10px;">${interaction} &rarr;</span>
+                        <span>${toState}</span>
+                    `;
+                }
+            }
+
+            header.classList.remove('hidden');
+        }
+
+        function setupEditor(preselectedMarkerName = null, animationIdForReturn = null, animDataForSetup = null, layerNameToFind = null, oldLayerNameToFind = null) {
+            welcomeMessage.classList.add('hidden');
+            editorSection.classList.remove('hidden');
+            // --- NEW: Show the layer panel ---
+            layerPanel.classList.remove('hidden');
+
+            // --- MODIFIED: Only show the resizable layer if not in view-only mode ---
+            if (!isViewOnly) {
+                resizableLayer.classList.remove('hidden');
+            }
+
+            // --- NEW: Set aspect ratio of the container to match the Lottie file ---
+            if (animDataForSetup && animDataForSetup.w > 0 && animDataForSetup.h > 0) {
+                const lottieAspectRatio = animDataForSetup.w / animDataForSetup.h;
+                layerContainer.style.aspectRatio = lottieAspectRatio;
+            }
+
+            // --- NEW: Logic to position the resizable layer ---
+            let layerToAlignWith = animDataForSetup?.layers?.find(l => l.nm === layerNameToFind);
+
+            // If the target layer doesn't exist, try to find the old one to align with.
+            if (!layerToAlignWith && oldLayerNameToFind) {
+                console.log(`[LOG] Target layer '${layerNameToFind}' not found. Attempting to align with old layer '${oldLayerNameToFind}'.`);
+                layerToAlignWith = animDataForSetup?.layers?.find(l => l.nm === oldLayerNameToFind);
+            }
+
+            // Wait for the container to have dimensions
+            const checkContainer = setInterval(() => {
+                const containerRect = layerContainer.getBoundingClientRect();
+                if (containerRect.width > 0 && animDataForSetup?.w > 0) {
+                    clearInterval(checkContainer);
+
+                    if (layerToAlignWith) {
+                        console.log(`[LOG] Found layer '${layerToAlignWith.nm}' to align with. Positioning editor to match.`);
+                        // Calculate scale and offset to convert Lottie coords to screen coords
+                        const containerAspectRatio = containerRect.width / containerRect.height;
+                        const nativeAspectRatio = animDataForSetup.w / animDataForSetup.h;
+                        let renderWidth, renderHeight, renderOffsetX, renderOffsetY;
+
+                        if (containerAspectRatio > nativeAspectRatio) {
+                            renderHeight = containerRect.height;
+                            renderWidth = renderHeight * nativeAspectRatio;
+                            renderOffsetX = (containerRect.width - renderWidth) / 2;
+                            renderOffsetY = 0;
+                        } else {
+                            renderWidth = containerRect.width;
+                            renderHeight = renderWidth / nativeAspectRatio;
+                            renderOffsetY = (containerRect.height - renderHeight) / 2;
+                            renderOffsetX = 0;
+                        }
+                        const scaleX = renderWidth / animDataForSetup.w;
+                        const scaleY = renderHeight / animDataForSetup.h;
+
+                        // Extract layer properties
+                        const rectShape = layerToAlignWith.shapes?.[0]?.it?.find(item => item.ty === 'rc');
+                        if (rectShape && layerToAlignWith.ks?.p?.k) {
+                            const lottieCenterX = layerToAlignWith.ks.p.k[0];
+                            const lottieCenterY = layerToAlignWith.ks.p.k[1];
+                            const lottieWidth = rectShape.s.k[0];
+                            const lottieHeight = rectShape.s.k[1];
+
+                            // Apply calculated position and size
+                            resizableLayer.style.width = `${lottieWidth * scaleX}px`;
+                            resizableLayer.style.height = `${lottieHeight * scaleY}px`;
+                            resizableLayer.style.left = `${renderOffsetX + (lottieCenterX - lottieWidth / 2) * scaleX}px`;
+                            resizableLayer.style.top = `${renderOffsetY + (lottieCenterY - lottieHeight / 2) * scaleY}px`;
+                        }
+                    } else {
+                        // Fallback: Center the resizable layer if no existing layer is found
+                        console.log(`[LOG] No existing layer found. Centering editor box.`);
+                        const initialWidth = containerRect.width * 0.5;
+                        const initialHeight = containerRect.height * 0.5;
+                        resizableLayer.style.width = `${initialWidth}px`;
+                        resizableLayer.style.height = `${initialHeight}px`;
+                        resizableLayer.style.left = `${(containerRect.width - initialWidth) / 2}px`;
+                        resizableLayer.style.top = `${(containerRect.height - initialHeight) / 2}px`;
+                    }
+                    // --- NEW: Perform an initial overlap check on load ---
+                    // This handles cases where an existing layer is already overlapping.
+                    checkForOverlap();
+                }
+            }, 100);
+
+            if (animation) {
+                animation.destroy();
+            }
+
+            animation = lottie.loadAnimation({
+                container: lottiePlayer,
+                renderer: 'svg',
+                loop: true,
+                autoplay: true,
+                animationData: animationData,
+            });
+
+            // --- NEW: Lottie player event listeners for new controls ---
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            const seekBar = document.getElementById('seek-bar');
+            const frameCounterStart = document.getElementById('frame-counter-start');
+            const frameCounterEnd = document.getElementById('frame-counter-end');
+
+            animation.addEventListener('DOMLoaded', () => {
+                const totalFrames = Math.floor(animationData.op - (animationData.ip || 0));
+                seekBar.max = totalFrames;
+                frameCounterEnd.textContent = totalFrames;
+                
+                // --- MODIFIED: Trigger a 'change' event on the segment dropdown ---
+                // This ensures that the initial state (highlight, seekbar position, guides)
+                // is correctly set based on the pre-selected segment, just as if the user
+                // had manually selected it. This unifies the behavior for both iframe and
+                // standalone modes.
+                // --- NEW: Populate layer panel on load ---
+                populateLayerPanel(animationData, preselectedMarkerName, layerNameToFind, oldLayerNameToFind);
+                // --- END NEW ---
+                segmentSelect.dispatchEvent(new Event('change'));
+            });
+
+            animation.addEventListener('enterFrame', () => {
+                // NEW: If the user is actively dragging the seek bar, don't let the animation's frame updates interfere.
+                if (isScrubbing) return;
+
+                const currentFrame = Math.floor(animation.currentFrame);
+                let displayFrame = currentFrame;
+
+                // --- NEW: Correction for lottie-web's behavior on segment loops ---
+                // When a segment loops, `currentFrame` can reset to be relative (e.g., 0) instead of absolute.
+                // We detect this and apply an offset to show the correct absolute frame.
+                const selectedOption = segmentSelect.options[segmentSelect.selectedIndex];
+                const isPlayingSegment = selectedOption && selectedOption.value !== 'full' && !animation.isPaused;
+
+                if (isPlayingSegment) {
+                    const [startFrame, endFrame] = selectedOption.value.split('-').map(Number);
+                    // If the reported frame is outside our segment's bounds, it's likely a relative frame after a loop.
+                    if (currentFrame < startFrame || currentFrame > endFrame) {
+                        displayFrame = startFrame + currentFrame;
+                    }
+                }
+                
+                seekBar.value = displayFrame;
+                frameCounterStart.textContent = displayFrame;
+                // Update seek bar progress fill
+                const totalFrames = animationData.op - (animationData.ip || 0);
+                const progress = (displayFrame / totalFrames) * 100;
+                seekBar.style.backgroundSize = `${progress}% 100%`;
+            });
+
+            playPauseBtn.addEventListener('click', () => {
+                const icon = playPauseBtn.querySelector('i');
+                if (animation.isPaused) {
+                    // --- MODIFIED: Play only the selected segment ---
+                    const selectedOption = segmentSelect.options[segmentSelect.selectedIndex];
+                    if (selectedOption && selectedOption.value !== 'full') {
+                        const [startFrame, endFrame] = selectedOption.value.split('-').map(Number);
+                        animation.playSegments([startFrame, endFrame], true);
+                    } else {
+                        animation.play(); // Default to playing the full animation
+                    }
+                    icon.className = 'fas fa-pause text-lg';
+                } else {
+                    animation.pause();
+                    icon.className = 'fas fa-play text-lg';
+                }
+                // isSegmentPlaying = !animation.isPaused; // REMOVED: Unused state variable
+            });
+
+            // --- NEW: Add mousedown/mouseup listeners to control scrubbing state ---
+            seekBar.addEventListener('mousedown', () => {
+                isScrubbing = true;
+                // If animation is playing, pause it while scrubbing
+                if (!animation.isPaused) {
+                    animation.pause();
+                    playPauseBtn.querySelector('i').className = 'fas fa-play text-lg';
+                }
+            });
+
+            // Listen on the whole document for mouseup in case the user releases the mouse outside the seek bar
+            document.addEventListener('mouseup', () => {
+                if (isScrubbing) {
+                    isScrubbing = false;
+                }
+            });
+
+            seekBar.addEventListener('input', (e) => {
+                const selectedOption = segmentSelect.options[segmentSelect.selectedIndex];
+                let frame = parseInt(e.target.value, 10);
+
+                // --- NEW: Force reset to the main timeline for accurate scrubbing ---
+                // This ensures that goToAndStop uses absolute frame numbers from the full animation.
+                if (!animation.isPaused) {
+                    animation.pause();
+                }
+                animation.resetSegments(true);
+
+                // --- MODIFIED: Constrain scrubbing to the selected segment's range ---
+                if (selectedOption && selectedOption.value !== 'full') {
+                    const [startFrame, endFrame] = selectedOption.value.split('-').map(Number);
+                    
+                    // Clamp the frame value to stay within the segment's start and end frames
+                    if (frame < startFrame) {
+                        frame = startFrame;
+                        e.target.value = frame; // Visually snap the thumb to the start
+                    }
+                    if (frame > endFrame) {
+                        frame = endFrame;
+                        e.target.value = frame; // Visually snap the thumb to the end
+                    }
+                    // When a segment is active, goToAndStop is sufficient.
+                } 
+                // --- REMOVED the 'else' block that previously contained the resetSegments call ---
+
+                animation.goToAndStop(frame, true);
+                
+                // The enterFrame listener will update the text content, but we can do it here for immediate feedback
+                frameCounterStart.textContent = frame;
+
+                // --- NEW: Update play button UI to reflect scrubbing state ---
+                const icon = playPauseBtn.querySelector('i');
+                icon.className = 'fas fa-play text-lg';
+            });
+            // --- END NEW Lottie player listeners ---
+
+            populateSegments();
+
+            // Pre-select the marker if a name was passed
+            if (preselectedMarkerName) {
+                const optionToSelect = Array.from(segmentSelect.options).find(opt => opt.text === preselectedMarkerName);
+                if (optionToSelect) {
+                    segmentSelect.value = optionToSelect.value;
+                } else {
+                    console.warn(`Marker "${preselectedMarkerName}" not found. Defaultings to 'Full Animation'.`);
+                    segmentSelect.value = 'full';
+                }
+            } else if (segmentSelect.options.length > 0) {
+                // Default to the first segment if available and none is pre-selected
+                segmentSelect.value = segmentSelect.options[0].value;
+            }
+            // playSelectedSegment(); // REMOVED: This was a leftover from older logic and is no longer needed.
+
+            // Store the animationId to be sent back
+            if (animationIdForReturn) {
+                downloadButton.dataset.animationId = animationIdForReturn;
+            }
+        }
+        
+        // --- NEW: Function to render other interactive layers as guides ---
+        function renderVisibleLayersAsGuides(animData, markerName, currentLayerNameToExclude, oldLayerNameToExclude = null) {
+            if (!animData || !animData.layers) return;
+            
+            const guideHighlight = document.getElementById('guide-highlight');
+            const guideHighlightTooltip = document.getElementById('guide-highlight-tooltip'); // NEW: Get tooltip element
+
+            // --- NEW: In view-only mode, we want to show all interactive layers, so we don't exclude any. ---
+            if (isViewOnly) {
+                currentLayerNameToExclude = null;
+            }
+            // 1. Find the segment's frame range from the marker name.
+            let segmentStart = 0;
+            let segmentEnd = animData.op; // Default to full animation length.
+
+            if (markerName && animData.markers) {
+                const marker = animData.markers.find(m => m.cm === markerName);
+                if (marker) {
+                    segmentStart = marker.tm;
+                    segmentEnd = marker.tm + marker.dr;
+                } else {
+                    console.warn(`[Guide Layers] Marker "${markerName}" not found. Defaulting to full animation range for guides.`);
+                }
+            }
+
+            // 2. Filter all layers to find those visible during the segment.
+            const visibleLayers = animData.layers.filter(layer => {
+                // A layer is visible if its time range [ip, op] overlaps with [segmentStart, segmentEnd].
+                const isVisible = layer.ip < segmentEnd && layer.op > segmentStart;
+                // Exclude the layer we are currently editing.
+                const isNotCurrentLayer = layer.nm !== currentLayerNameToExclude;
+                // --- NEW: Exclude the old layer name if provided ---
+                const isNotOldLayer = !oldLayerNameToExclude || layer.nm !== oldLayerNameToExclude;
+                // --- FIX: Ensure the layer is an interactive layer by checking its name against the regex ---
+                const interactiveLayerRegex = /.+_(click|pointerenter|pointerexit|pointerdown|pointerup|pointermove)_to_.+/;
+                const isInteractive = layer.nm && interactiveLayerRegex.test(layer.nm);
+                // Exclude layers that are just groups or have no shapes (often invisible helpers).
+                const hasShapes = layer.shapes && layer.shapes.length > 0;
+
+                return isInteractive && isVisible && isNotCurrentLayer && isNotOldLayer && hasShapes;
+            });
+
+            console.log(`[LOG] Found ${visibleLayers.length} layers visible during segment '${markerName}' [${segmentStart}-${segmentEnd}].`);
+            if (visibleLayers.length > 0) {
+                console.log("[LOG] Names of layers shown as guides:", visibleLayers.map(l => l.nm));
+            }
+
+            // Clear any previous guides
+            document.querySelectorAll('.guide-layer').forEach(el => el.remove());
+
+            // Wait for the main container to be ready
+            const checkContainer = setInterval(() => {
+                const containerRect = layerContainer.getBoundingClientRect();
+                if (containerRect.width > 0 && animData.w > 0 && animData.h > 0) {
+                    clearInterval(checkContainer);
+
+                    const containerAspectRatio = containerRect.width / containerRect.height;
+                    const nativeAspectRatio = animData.w / animData.h;
+                    let renderWidth, renderHeight, renderOffsetX, renderOffsetY;
+
+                    renderHeight = containerRect.height;
+                    renderWidth = renderHeight * nativeAspectRatio;
+                    renderOffsetX = (containerRect.width - renderWidth) / 2;
+                    renderOffsetY = 0;
+
+                    const scaleX = renderWidth / animData.w;
+                    const scaleY = renderHeight / animData.h;
+
+                    // Create and position a guide div for each layer
+                    visibleLayers.forEach(layer => {
+                        const rectShape = layer.shapes?.[0]?.it?.find(item => item.ty === 'rc');
+                        if (!rectShape || !layer.ks?.p?.k) return;
+
+                        const lottieCenterX = layer.ks.p.k[0];
+                        const lottieCenterY = layer.ks.p.k[1];
+                        const lottieWidth = rectShape.s.k[0];
+                        const lottieHeight = rectShape.s.k[1];
+
+                        const guide = document.createElement('div');
+                        guide.className = 'guide-layer';
+                        guide.dataset.layerName = layer.nm; // NEW: Add data attribute to identify the guide layer
+                        guide.style.width = `${lottieWidth * scaleX}px`;
+                        guide.style.height = `${lottieHeight * scaleY}px`;
+                        guide.style.left = `${renderOffsetX + (lottieCenterX - lottieWidth / 2) * scaleX}px`;
+                        guide.style.top = `${renderOffsetY + (lottieCenterY - lottieHeight / 2) * scaleY}px`;
+
+                        // --- NEW: Create and append tooltip ---
+                        const tooltip = document.createElement('div');
+                        tooltip.className = 'tooltip';
+
+                        // --- NEW: Parse layer name and create rich tooltip ---
+                        const layerName = layer.nm;
+                        const toSeparator = '_to_';
+                        const toIndex = layerName.lastIndexOf(toSeparator);
+
+                        if (toIndex !== -1) {
+                            const toState = layerName.substring(toIndex + toSeparator.length).replace(/_/g, ' ');
+                            const beforePart = layerName.substring(0, toIndex);
+                            const lastUnderscoreIndex = beforePart.lastIndexOf('_');
+                            
+                            if (lastUnderscoreIndex !== -1) {
+                                const fromState = beforePart.substring(0, lastUnderscoreIndex).replace(/_/g, ' ');
+                                const interaction = beforePart.substring(lastUnderscoreIndex + 1);
+
+                                tooltip.innerHTML = `
+                                    <span>${fromState}</span>
+                                    <span class="tooltip-pill">${interaction} &rarr;</span>
+                                    <span>${toState}</span>
+                                `;
+                            }
+                        // --- END MODIFIED ---
+                        } else {
+                            tooltip.textContent = layerName; // Fallback to raw name
+                        }
+                        // --- END NEW ---
+
+                        guide.appendChild(tooltip);
+                        
+                        guide.addEventListener('mouseenter', () => {
+                            const totalFrames = animationData.op - (animationData.ip || 0);
+                            if (animation && totalFrames > 0 && guideHighlight) {
+                                const startPercent = (layer.ip / totalFrames) * 100;
+                                const widthPercent = ((layer.op - layer.ip) / totalFrames) * 100;
+                                guideHighlight.style.left = `${startPercent}%`;
+                                guideHighlight.style.width = `${widthPercent}%`;
+                                guideHighlight.classList.remove('hidden');
+                                // --- NEW: Show and position the seek bar tooltip ---
+                                if (guideHighlightTooltip) {
+                                    guideHighlightTooltip.textContent = `Frames: ${Math.round(layer.ip)} - ${Math.round(layer.op)}`;
+                                    guideHighlightTooltip.classList.remove('hidden');
+                                }
+                            }
+                        });
+                        guide.addEventListener('mouseleave', () => {
+                            if(guideHighlight) {
+                                guideHighlight.classList.add('hidden');
+                                if (guideHighlightTooltip) guideHighlightTooltip.classList.add('hidden'); // NEW: Hide tooltip
+                            }
+                        });
+
+
+                        layerContainer.appendChild(guide);
+                    });
+                    // --- NEW: Update z-indices after guides are rendered ---
+                    updateLayerZIndices();
+                }
+            }, 100);
+        }
+
+        // --- 2. Segment Handling ---
+        function populateSegments() {
+            segmentSelect.innerHTML = ''; // Clear previous segments
+            
+            // Add an option to play the full animation
+            const fullAnimOption = document.createElement('option');
+            fullAnimOption.value = 'full';
+            fullAnimOption.textContent = 'Full Animation';
+            segmentSelect.appendChild(fullAnimOption);
+
+            if (animationData.markers && animationData.markers.length > 0) {
+                animationData.markers.forEach((marker, index) => {
+                    const option = document.createElement('option');
+                    // Markers have `tm` (time/start frame) and `dr` (duration frames)
+                    option.value = `${marker.tm}-${marker.tm + marker.dr}`;
+                    option.textContent = marker.cm; // Comment/Name of the marker
+                    segmentSelect.appendChild(option);
+                });
+            }
+        }
+
+        segmentSelect.addEventListener('change', () => {
+            // --- MODIFIED: Changing segment now only updates the guide layers, not playback ---
+            const selectedOption = segmentSelect.options[segmentSelect.selectedIndex];
+            const markerName = selectedOption.text;
+            // --- NEW: Repopulate layer panel on segment change ---
+            populateLayerPanel(animationData, markerName, currentLayerName, currentOldLayerName);
+            renderVisibleLayersAsGuides(animationData, markerName, currentLayerName, currentOldLayerName);
+            checkForOverlap(); // Re-check for overlaps with the new set of guides.
+            // NEW: Update the highlight on the seek bar
+            updateSegmentHighlight();
+
+            // --- NEW: Pause animation and go to the start of the selected segment ---
+            let startFrame = 0;
+            if (selectedOption.value !== 'full') {
+                [startFrame] = selectedOption.value.split('-').map(Number);
+            }
+            
+            // Go to the start frame of the segment and pause the animation
+            animation.goToAndStop(startFrame, true);
+
+            // Update the play/pause button UI to show the 'play' icon
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            const icon = playPauseBtn.querySelector('i');
+            icon.className = 'fas fa-play text-lg';
+            // isSegmentPlaying = false; // REMOVED: Unused state variable
+
+            // --- NEW: Simulate a click to start playing the selected segment immediately ---
+            playPauseBtn.click();
+        });
+        
+        // --- NEW: Helper function to format layer names for display ---
+        function formatLayerNameForDisplay(layerName) {
+            if (!layerName) return 'Unnamed Layer';
+
+            const toSeparator = '_to_';
+            const toIndex = layerName.lastIndexOf(toSeparator);
+
+            if (toIndex !== -1) {
+                const toState = layerName.substring(toIndex + toSeparator.length).replace(/_/g, ' ');
+                const beforePart = layerName.substring(0, toIndex);
+                const lastUnderscoreIndex = beforePart.lastIndexOf('_');
+                
+                if (lastUnderscoreIndex !== -1) {
+                    const fromState = beforePart.substring(0, lastUnderscoreIndex).replace(/_/g, ' ');
+                    const interaction = beforePart.substring(lastUnderscoreIndex + 1);
+
+                    // Return a rich HTML string for display
+                    return `
+                        <span>${fromState}</span> <span class="layer-name-pill">${interaction} <i class="fas fa-chevron-right"></i></span> <span>${toState}</span>
+                    `;
+                }
+            }
+            return `<span>${layerName}</span>`; // Fallback to the raw name if parsing fails
+        }
+
+        // --- NEW: Layer Panel Logic ---
+        function populateLayerPanel(animData, markerName, currentLayerNameToExclude, oldLayerNameToExclude = null) {
+            layerList.innerHTML = ''; // Clear existing items
+            if (!animData || !animData.layers) return;
+
+            let segmentStart = 0;
+            let segmentEnd = animData.op;
+            if (markerName && animData.markers) {
+                const marker = animData.markers.find(m => m.cm === markerName);
+                if (marker) {
+                    segmentStart = marker.tm;
+                    segmentEnd = marker.tm + marker.dr;
+                }
+            }
+
+            // Filter for interactive layers visible in the current segment
+            const interactiveLayerRegex = /.+_(click|pointerenter|pointerexit|pointerdown|pointerup|pointermove)_to_.+/;
+            visibleLayersForPanel = animData.layers
+                .map((layer, index) => ({ ...layer, originalIndex: index })) // Keep original index
+                .filter(layer => {
+                    const isInteractive = layer.nm && interactiveLayerRegex.test(layer.nm);
+                    const isVisible = layer.ip < segmentEnd && layer.op >= segmentStart;
+                    const isNotOldLayer = !oldLayerNameToExclude || layer.nm !== oldLayerNameToExclude;
+                    return isInteractive && isVisible && isNotOldLayer;
+                });
+                // .sort((a, b) => b.ind - a.ind); // REMOVED: We will now respect the array order as the source of truth for priority.
+
+            // --- NEW: If creating a new layer, add it to the panel temporarily ---
+            const isCurrentLayerInList = visibleLayersForPanel.some(l => l.nm === currentLayerNameToExclude);
+            if (!isViewOnly && currentLayerNameToExclude && !isCurrentLayerInList) {
+                const newLayerPlaceholder = {
+                    nm: currentLayerNameToExclude,
+                    // Give it a high index to appear at the top of the list (which is sorted descending)
+                    ind: (animData.layers.length > 0 ? Math.max(...animData.layers.map(l => l.ind)) : 0) + 1,
+                    ip: segmentStart,
+                    op: segmentEnd,
+                };
+                visibleLayersForPanel.unshift(newLayerPlaceholder); // Add to the top of the visual list
+            }
+            // --- END NEW ---
+
+            visibleLayersForPanel.forEach(layer => {
+                const item = document.createElement('div');
+                item.className = 'layer-item';
+                item.dataset.layerName = layer.nm;
+                item.draggable = true;
+
+                if (layer.nm === currentLayerNameToExclude) {
+                    item.classList.add('active-editing-layer');
+                }
+
+                item.innerHTML = `
+                    <div class="flex items-center flex-grow"> <!-- NEW: Wrapper to group icon and text -->
+                        <i class="fas fa-vector-square layer-icon mr-2"></i>
+                        <div class="flex items-center text-sm">${formatLayerNameForDisplay(layer.nm)}</div>
+                    </div>
+                    <i class="fas fa-grip-lines-vertical layer-grab-handle"></i> <!-- MOVED: Grip handle to the end -->
+                `;
+                layerList.appendChild(item);
+            });
+
+            // Add drag and drop listeners
+            addDragAndDropListeners();
+        }
+
+        function addDragAndDropListeners() {
+            const items = layerList.querySelectorAll('.layer-item');
+            items.forEach(item => {
+                item.addEventListener('dragstart', () => item.classList.add('dragging'));
+                item.addEventListener('dragend', () => item.classList.remove('dragging'));
+            });
+
+            layerList.addEventListener('dragover', e => {
+                e.preventDefault();
+                const draggingItem = document.querySelector('.layer-item.dragging');
+                if (!draggingItem) return;
+
+                const afterElement = getDragAfterElement(layerList, e.clientY);
+                if (afterElement == null) {
+                    layerList.appendChild(draggingItem);
+                } else {
+                    layerList.insertBefore(draggingItem, afterElement);
+                }
+                // --- NEW: Update z-indices after reordering ---
+                updateLayerZIndices();
+            });
+        }
+
+        function getDragAfterElement(container, y) {
+            const draggableElements = [...container.querySelectorAll('.layer-item:not(.dragging)')];
+            return draggableElements.reduce((closest, child) => {
+                const box = child.getBoundingClientRect();
+                const offset = y - box.top - box.height / 2;
+                return (offset < 0 && offset > closest.offset) ? { offset: offset, element: child } : closest;
+            }, { offset: Number.NEGATIVE_INFINITY }).element;
+        }
+
+        // --- NEW: Function to update z-index based on panel order ---
+        function updateLayerZIndices() {
+            const orderedLayerItems = Array.from(layerList.querySelectorAll('.layer-item'));
+            const baseZIndex = 5; // The z-index of the lowest layer
+
+            // Iterate backwards through the list in the panel.
+            // The last item in the list (visually at the bottom) gets the lowest z-index.
+            [...orderedLayerItems].reverse().forEach((item, index) => {
+                const layerName = item.dataset.layerName;
+                const zIndex = baseZIndex + index;
+
+                if (item.classList.contains('active-editing-layer')) {
+                    // This is our main editable blue box
+                    resizableLayer.style.zIndex = zIndex;
+                } else {
+                    // This is a guide layer
+                    const guideLayer = document.querySelector(`.guide-layer[data-layer-name="${layerName}"]`);
+                    if (guideLayer) {
+                        guideLayer.style.zIndex = zIndex;
+                    }
+                }
+            });
+        }
+
+        // MODIFIED: Function to draw the highlight on the seek bar, now always shows.
+        function updateSegmentHighlight() {
+            const highlightBar = document.getElementById('segment-highlight');
+            const selectedOption = segmentSelect.options[segmentSelect.selectedIndex];
+            
+            if (!animation || !highlightBar) return;
+
+            const totalFrames = animationData.op - (animationData.ip || 0);
+            if (totalFrames <= 0) {
+                highlightBar.classList.add('hidden');
+                return;
+            }
+
+            let startPercent = 0;
+            let widthPercent = 100;
+
+            // If a specific segment is selected (not 'full'), calculate its position.
+            if (selectedOption && selectedOption.value !== 'full') {
+                const [startFrame, endFrame] = selectedOption.value.split('-').map(Number);
+                startPercent = (startFrame / totalFrames) * 100;
+                const endPercent = (endFrame / totalFrames) * 100;
+                widthPercent = endPercent - startPercent;
+            }
+
+            // Apply styles to the highlight bar
+            highlightBar.style.left = `${startPercent}%`;
+            highlightBar.style.width = `${widthPercent}%`;
+            highlightBar.classList.remove('hidden');
+        }
+
+
+        // --- REMOVED: Old Play/Pause Logic and playSelectedSegment function ---
+
+        // --- 3. Resizable & Draggable Layer Logic ---
+        let isDragging = false;
+        let isResizing = false;
+        let currentHandle = null;
+        let startX, startY, startLeft, startTop, startWidth, startHeight;
+
+        resizableLayer.addEventListener('mousedown', (e) => {
+            // Prevent text selection while dragging/resizing
+            e.preventDefault();
+            
+            if (e.target.classList.contains('resize-handle')) {
+                isResizing = true;
+                currentHandle = e.target.dataset.handle;
+            } else {
+                isDragging = true;
+            }
+
+            startX = e.clientX;
+            startY = e.clientY;
+            startLeft = resizableLayer.offsetLeft;
+            startTop = resizableLayer.offsetTop;
+            startWidth = resizableLayer.offsetWidth;
+            startHeight = resizableLayer.offsetHeight;
+
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+        });
+
+        function handleMouseMove(e) {
+            if (isDragging) {
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                
+                let newLeft = startLeft + dx;
+                let newTop = startTop + dy;
+
+                // Constrain within the container bounds
+                const containerRect = layerContainer.getBoundingClientRect();
+                newLeft = Math.max(0, Math.min(newLeft, containerRect.width - resizableLayer.offsetWidth));
+                newTop = Math.max(0, Math.min(newTop, containerRect.height - resizableLayer.offsetHeight));
+
+                resizableLayer.style.left = `${newLeft}px`;
+                resizableLayer.style.top = `${newTop}px`;
+
+            } else if (isResizing) {
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                
+                let newWidth = startWidth;
+                let newHeight = startHeight;
+                let newLeft = startLeft;
+                let newTop = startTop;
+
+                // Update dimensions and position based on the handle being dragged
+                if (currentHandle.includes('right')) {
+                    newWidth = startWidth + dx;
+                }
+                if (currentHandle.includes('left')) {
+                    newWidth = startWidth - dx;
+                    newLeft = startLeft + dx;
+                }
+                if (currentHandle.includes('bottom')) {
+                    newHeight = startHeight + dy;
+                }
+                if (currentHandle.includes('top')) {
+                    newHeight = startHeight - dy;
+                    newTop = startTop + dy;
+                }
+                
+                // Enforce minimum size and constrain within parent
+                if (newWidth > 20 && newLeft >= 0 && (newLeft + newWidth) <= layerContainer.offsetWidth) {
+                     resizableLayer.style.width = `${newWidth}px`;
+                     resizableLayer.style.left = `${newLeft}px`;
+                }
+                if (newHeight > 20 && newTop >= 0 && (newTop + newHeight) <= layerContainer.offsetHeight) {
+                     resizableLayer.style.height = `${newHeight}px`;
+                     resizableLayer.style.top = `${newTop}px`;
+                }
+                // --- FIX: Call overlap check during resize ---
+                if (isResizing) {
+                    checkForOverlap();
+                }
+            }
+        }
+
+        function handleMouseUp() {
+            isDragging = false;
+            isResizing = false;
+            currentHandle = null;
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+
+            // --- FIX: Final overlap check on mouse up ---
+            checkForOverlap();
+        }
+
+        // --- NEW: Function to check for overlap with guide layers ---
+        function checkForOverlap() {
+            const layerRect = resizableLayer.getBoundingClientRect();
+            const guideLayers = document.querySelectorAll('.guide-layer');
+            let isOverlapping = false;
+
+            for (const guide of guideLayers) {
+                const guideRect = guide.getBoundingClientRect();
+                // Standard axis-aligned bounding box (AABB) intersection test
+                if (layerRect.left < guideRect.right && layerRect.right > guideRect.left &&
+                    layerRect.top < guideRect.bottom && layerRect.bottom > guideRect.top) {
+                    isOverlapping = true;
+                    break; // Exit early once an overlap is found
+                }
+            }
+
+            // Provide visual feedback and disable save button on overlap
+            resizableLayer.style.borderColor = isOverlapping ? '#f97316' : '#3b82f6'; // orange-500 vs Blue-500
+            downloadButton.disabled = false; // Always allow saving
+
+            // --- NEW: Show or hide the overlap warning message ---
+            const warningMessage = document.getElementById('overlap-warning');
+            if (warningMessage) {
+                warningMessage.classList.toggle('hidden', !isOverlapping);
+            }
+            // --- END NEW ---
+        }
+
+        // --- 4. Save Logic ---
+        saveButton.addEventListener('click', () => {
+            const layerName = layerNameInput.value || 'unnamed_layer';
+            const selectedSegmentOption = segmentSelect.options[segmentSelect.selectedIndex];
+            const segmentName = selectedSegmentOption.text;
+
+            const containerRect = layerContainer.getBoundingClientRect();
+            
+            // Calculate relative position and dimensions as percentages for display
+            const x = (resizableLayer.offsetLeft / containerRect.width) * 100;
+            const y = (resizableLayer.offsetTop / containerRect.height) * 100;
+            const width = (resizableLayer.offsetWidth / containerRect.width) * 100;
+            const height = (resizableLayer.offsetHeight / containerRect.height) * 100;
+
+            const outputData = {
+                layerName: layerName,
+                associatedSegment: segmentName,
+                bounds_percentage: {
+                    x: parseFloat(x.toFixed(2)),
+                    y: parseFloat(y.toFixed(2)),
+                    width: parseFloat(width.toFixed(2)),
+                    height: parseFloat(height.toFixed(2)),
+                }
+            };
+
+            // Store precise pixel data AND the container/animation metrics at the moment of saving
+            finalLayerDataForExport = {
+                name: layerName,
+                segment: {
+                    name: segmentName,
+                    value: selectedSegmentOption.value,
+                },
+                boundsPixels: {
+                    x: resizableLayer.offsetLeft,
+                    y: resizableLayer.offsetTop,
+                    width: resizableLayer.offsetWidth,
+                    height: resizableLayer.offsetHeight,
+                },
+                metricsAtSave: {
+                    containerWidth: layerContainer.offsetWidth,
+                    containerHeight: layerContainer.offsetHeight,
+                    nativeWidth: animationData.w,
+                    nativeHeight: animationData.h,
+                }
+            };
+            
+           
+            
+            // Show the correct buttons based on the mode
+            if (dataLoadedFromParent) closeButton.classList.remove('hidden');
+        });
+
+        downloadButton.addEventListener('click', () => {
+            // --- NEW: Trigger the save logic first to finalize the layer data ---
+            saveButton.click();
+            // --- END NEW ---
+
+             if (!pristineAnimationData || !finalLayerDataForExport) {
+                 // This check is now a fallback, as saveButton.click() should populate the data.
+                 return;
+             }
+
+            // FIX: Use the pristine, untouched data as the starting point to avoid bloat.
+            const modifiedAnimationData = JSON.parse(JSON.stringify(pristineAnimationData));
+
+            const { name, segment, boundsPixels, metricsAtSave } = finalLayerDataForExport;
+            
+            // Robustly scale coordinates by simulating Lottie's 'xMidYMid meet' aspect ratio preservation
+            if (!metricsAtSave.nativeWidth || !metricsAtSave.nativeHeight) {
+                alert('Could not determine Lottie animation dimensions from the file. Cannot export.');
+                return;
+            }
+
+            const containerAspectRatio = metricsAtSave.containerWidth / metricsAtSave.containerHeight;
+            const nativeAspectRatio = metricsAtSave.nativeWidth / metricsAtSave.nativeHeight;
+
+            let renderWidth, renderHeight, renderOffsetX, renderOffsetY;
+
+            if (containerAspectRatio > nativeAspectRatio) {
+                renderHeight = metricsAtSave.containerHeight;
+                renderWidth = renderHeight * nativeAspectRatio;
+                renderOffsetX = (metricsAtSave.containerWidth - renderWidth) / 2;
+                renderOffsetY = 0;
+            } else {
+                renderWidth = metricsAtSave.containerWidth;
+                renderHeight = renderWidth / nativeAspectRatio;
+                renderOffsetY = (metricsAtSave.containerHeight - renderHeight) / 2;
+                renderOffsetX = 0;
+            }
+            
+            const scaleX = metricsAtSave.nativeWidth / renderWidth;
+            const scaleY = metricsAtSave.nativeHeight / renderHeight;
+
+            const boundsInSvgSpace = {
+                x: boundsPixels.x - renderOffsetX,
+                y: boundsPixels.y - renderOffsetY
+            };
+            
+            const scaledBounds = {
+                x: boundsInSvgSpace.x * scaleX,
+                y: boundsInSvgSpace.y * scaleY,
+                width: boundsPixels.width * scaleX,
+                height: boundsPixels.height * scaleY,
+            };
+
+            // LOG ADDED: Log the final calculated coordinates before creating the layer
+            const finalX = scaledBounds.x + scaledBounds.width / 2;
+            const finalY = scaledBounds.y + scaledBounds.height / 2;
+            console.log(`Finalizing layer. Calculated Lottie coordinates for group position: x=${finalX}, y=${finalY}`);
+            
+            let inPoint = 0;
+            // Correctly set the default in-point and out-point to the animation's root ip and op.
+            inPoint = pristineAnimationData.ip || 0;
+            let outPoint = pristineAnimationData.op;
+            if (segment.value !== 'full') {
+                const [startFrame, endFrame] = segment.value.split('-').map(Number);
+                inPoint = startFrame;
+                outPoint = endFrame;
+            }
+
+            // Always add 0.1 to the final outPoint value as requested.
+            outPoint += 0.1;
+
+              // Find the highest current layer index to ensure our new layer has a unique one
+            const maxIndex = modifiedAnimationData.layers.reduce((max, layer) => Math.max(max, layer.ind || 0), 0);
+            const newLayerIndex = maxIndex + 1;
+
+            // --- FIX START: Use a pre-defined, structurally-valid template for the new layer ---
+            const newShapeLayerTemplate = {
+                "ddd": 0, "ty": 4, "nm": name, "sr": 1, "ind": newLayerIndex,
+                "ks": {
+                    "o": { "a": 0, "k": 100, "ix": 11 }, // FIX: Changed to non-animated property
+                    "r": { "a": 0, "k": 0, "ix": 10 },
+                    // FIX: The final calculated position is now correctly applied to the LAYER's transform.
+                    "p": { "a": 0, "k": [finalX, finalY, 0], "ix": 2 },
+                    "a": { "a": 0, "k": [0, 0, 0], "ix": 1 },
+                    "s": { "a": 0, "k": [100, 100, 100], "ix": 6 } // FIX: Changed to non-animated property
+                },
+                "ao": 0,
+                "shapes": [{
+                    "ty": "gr", "nm": `${name} Group`, "np": 3,
+                    "it": [
+                        { "ty": "rc", "nm": "Rectangle", "d": 1, "p": { "a": 0, "k": [0, 0], "ix": 2 }, "s": { "a": 0, "k": [scaledBounds.width, scaledBounds.height], "ix": 3 }, "r": { "a": 0, "k": 0, "ix": 4 } },
+                        { "ty": "fl", "nm": "Gray Fill", "c": { "a": 0, "k": [0.5, 0.5, 0.5, 1], "ix": 3 }, "o": { "a": 0, "k": 10, "ix": 4 } },
+                        { "ty": "tr", "nm": "Transform", "p": { "a": 0, "k": [0, 0], "ix": 2 }, "a": { "a": 0, "k": [0, 0], "ix": 1 }, "s": { "a": 0, "k": [100, 100], "ix": 3 }, "r": { "a": 0, "k": 0, "ix": 6 }, "o": { "a": 0, "k": 100, "ix": 7 }, "sk": { "a": 0, "k": 0, "ix": 4 }, "sa": { "a": 0, "k": 0, "ix": 5 } }
+                    ],
+                    "ks": {
+                        "o": { "a": 0, "k": 100, "ix": 11 },
+                        "r": { "a": 0, "k": 0, "ix": 10 },
+                        // FIX: The inner group's position is reset to [0,0] as it's now relative to the positioned parent layer.
+                        "p": { "a": 0, "k": [0, 0], "ix": 2 },
+                        "a": { "a": 0, "k": [0, 0], "ix": 1 },
+                        "s": { "a": 0, "k": [100, 100], "ix": 6 }
+                    }
+                }],
+                "ip": inPoint, "op": outPoint, "st": inPoint, "bm": 0
+            };
+            // --- FIX END ---
+            
+            // --- REVISED: Consolidated Layer Reordering and Insertion Logic ---
+            // 1. Get the desired order of layer names from the UI panel.
+            const orderedLayerNames = Array.from(layerList.querySelectorAll('.layer-item'))
+                .map(item => item.dataset.layerName);
+
+            // 2. Create a map of all original layers from the pristine data for easy lookup.
+            const originalLayersMap = new Map(pristineAnimationData.layers.map(l => [l.nm, l]));
+
+            // 3. Separate the layers that are NOT managed by the side panel.
+            const managedLayerNames = new Set(visibleLayersForPanel.map(l => l.nm));
+            // Also consider the new layer name as managed
+            managedLayerNames.add(name); 
+            const baseLayers = pristineAnimationData.layers.filter(l => !managedLayerNames.has(l.nm));
+
+            // 4. Build the new list of managed layers in the correct order from the UI.
+            const reorderedManagedLayers = orderedLayerNames.map(layerName => {
+                // If the name matches the layer we just edited, use the new template.
+                if (layerName === name) {
+                    return newShapeLayerTemplate;
+                }
+                // Otherwise, get the original, unmodified layer from our map.
+                return originalLayersMap.get(layerName);
+            }).filter(Boolean); // Filter out any potential undefineds.
+
+            // 5. Reconstruct the final layers array. Managed layers go first (rendered on top),
+            // followed by the rest of the original layers. Crucially, we do NOT re-assign 'ind' properties.
+            modifiedAnimationData.layers = [...reorderedManagedLayers, ...baseLayers];
+            // --- END REVISED LOGIC ---
+
+            // --- NEW: Post message back to parent instead of downloading ---
+            if (dataLoadedFromParent) {
+                const messageToSend = {
+                    type: 'clickAreaDataFromMarkerTool',
+                    modifiedAnimationData: modifiedAnimationData,
+                    originalAnimationId: downloadButton.dataset.animationId || 'unknown_animation' // Send back the correct ID
+                };
+
+                // --- NEW: Log the data being sent back to the parent ---
+                console.log('[LOG] Sending data back to parent window:', JSON.parse(JSON.stringify(messageToSend)));
+
+                window.parent.postMessage(messageToSend, '*'); // Use a specific origin in production for security!
+
+            } else {
+                // Fallback to original download behavior if not in an iframe
+                const blob = new Blob([JSON.stringify(modifiedAnimationData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'lottie_with_layer'}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+        });
+
+        // --- NEW: Download Preview Button Logic ---
+        const downloadPreviewButton = document.getElementById('download-preview-button');
+        downloadPreviewButton.addEventListener('click', () => {
+            if (!animationData) {
+                alert('No animation data is currently loaded to download.');
+                return;
+            }
+
+            const dataStr = JSON.stringify(animationData, null, 2);
+            const dataBlob = new Blob([dataStr], {type: "application/json"});
+            const url = URL.createObjectURL(dataBlob);
+
+            const downloadLink = document.createElement('a');
+            downloadLink.href = url;
+            const layerName = layerNameInput.value || 'preview';
+            downloadLink.download = `${layerName}_preview.json`;
+
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+            URL.revokeObjectURL(url);
+        });
+
+    </script>
+</body>
+</html>
