@@ -83,7 +83,7 @@
 
     #editorArea {
       flex: 1;
-      overflow-y: auto;
+     
       min-height: 960px;
     height: 93vh; /* Adjusted max-height */
       /* Space for potential scrollbar (hidden) */
